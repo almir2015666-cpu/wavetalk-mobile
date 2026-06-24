@@ -42,7 +42,8 @@ workflows:
             -configuration Release \
             -archivePath build/WaveTalk.xcarchive \
             archive \
-            CODE_SIGN_STYLE=Automatic \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="Apple Distribution" \
             DEVELOPMENT_TEAM=$APPLE_TEAM_ID
       - name: Export IPA
         script: |
