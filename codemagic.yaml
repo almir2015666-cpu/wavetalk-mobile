@@ -24,6 +24,9 @@ workflows:
         script: |
           cd ios
           pod install
+      - name: Remove push notification entitlement
+        script: |
+          /usr/libexec/PlistBuddy -c "Delete :aps-environment" ios/WaveTalk/WaveTalk.entitlements 2>/dev/null || true
       - name: Set up signing
         script: |
           app-store-connect fetch-signing-files $BUNDLE_ID \
