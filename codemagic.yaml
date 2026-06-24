@@ -17,7 +17,7 @@ workflows:
         - pattern: main
     scripts:
       - name: Install dependencies
-        script: npm install
+        script: npm install --legacy-peer-deps
       - name: Prebuild iOS
         script: npx expo prebuild --platform ios --clean
       - name: Install CocoaPods
