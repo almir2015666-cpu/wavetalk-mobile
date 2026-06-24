@@ -7,8 +7,6 @@ workflows:
       ios_signing:
         distribution_type: app_store
         bundle_identifier: com.wavetalk.app
-      groups:
-        - wavetalk
       vars:
         XCODE_WORKSPACE: ios/WaveTalk.xcworkspace
         XCODE_SCHEME: WaveTalk
