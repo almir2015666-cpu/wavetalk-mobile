@@ -1,20 +1,28 @@
-import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, View } from 'react-native';
+import React, { useState } from 'react';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+import LoginScreen from './src/screens/LoginScreen';
+import MainScreen  from './src/screens/MainScreen';
+
+type Screen = 'login' | 'main';
 
 export default function App() {
+  const [screen,  setScreen]  = useState<Screen>('login');
+  const [loading, setLoading] = useState(false);
+  const [myName,  setMyName]  = useState('');
+  const [myCh,    setMyCh]    = useState('geral');
+
+  const handleEnter = (name: string) => {
+    setLoading(true);
+    setMyName(name);
+    setTimeout(() => { setScreen('main'); setLoading(false); }, 600);
+  };
+
   return (
-    <View style={styles.container}>
-      <Text>Open up App.tsx to start working on your app!</Text>
-      <StatusBar style="auto" />
-    </View>
+    <SafeAreaProvider>
+      {screen === 'login'
+        ? <LoginScreen onEnter={handleEnter} loading={loading}/>
+        : <MainScreen  myName={myName} myChannel="geral"/>
+      }
+    </SafeAreaProvider>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-});

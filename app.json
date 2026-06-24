@@ -1,25 +1,45 @@
 {
   "expo": {
-    "name": "wavetalk-mobile",
-    "slug": "wavetalk-mobile",
+    "name": "WaveTalk",
+    "slug": "wavetalk",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#07090f",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#07090f"
+    },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": false,
+      "bundleIdentifier": "com.wavetalk.app",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "WaveTalk precisa do microfone para transmissão de voz em push-to-talk.",
+        "UIBackgroundModes": ["audio", "fetch", "remote-notification"]
+      }
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
-        "monochromeImage": "./assets/android-icon-monochrome.png"
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#07090f"
       },
-      "predictiveBackGestureEnabled": false
+      "permissions": ["RECORD_AUDIO"],
+      "package": "com.wavetalk.app"
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      [
+        "expo-av",
+        { "microphonePermission": "WaveTalk precisa do microfone para push-to-talk." }
+      ]
+    ],
+    "extra": {
+      "serverUrl": "http://localhost:3001"
     }
   }
 }
