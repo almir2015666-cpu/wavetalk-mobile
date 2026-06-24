@@ -5,7 +5,7 @@ workflows:
     instance_type: mac_mini_m2
     environment:
       groups:
-        - nutri
+        - wavetalk
       vars:
         BUNDLE_ID: com.wavetalk.app
         XCODE_WORKSPACE: ios/WaveTalk.xcworkspace
