@@ -33,7 +33,13 @@ workflows:
             --type IOS_APP_STORE \
             --create
           keychain add-certificates
-          xcode-project use-profiles
+          echo "=== Profiles downloaded ==="
+          ls -la "$HOME/Library/MobileDevice/Provisioning Profiles/" 2>/dev/null || echo "EMPTY"
+          echo "=== Before use-profiles ==="
+          grep "CODE_SIGN\|PROVISIONING" ios/WaveTalk.xcodeproj/project.pbxproj | head -20
+          cd ios && xcode-project use-profiles
+          echo "=== After use-profiles ==="
+          grep "CODE_SIGN\|PROVISIONING" WaveTalk.xcodeproj/project.pbxproj | head -20
       - name: Build iOS
         script: |
           xcodebuild \
