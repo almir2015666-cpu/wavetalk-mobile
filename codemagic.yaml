@@ -35,6 +35,8 @@ workflows:
             --issuer-id "$APP_STORE_CONNECT_ISSUER_ID" \
             --type IOS_APP_STORE \
             --create
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles/
+          find . -name "*.mobileprovision" -exec cp {} ~/Library/MobileDevice/Provisioning\ Profiles/ \;
           keychain add-certificates
           xcode-project use-profiles
       - name: Build iOS
