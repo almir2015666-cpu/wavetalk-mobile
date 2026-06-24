@@ -35,10 +35,16 @@ workflows:
             --issuer-id "$APP_STORE_CONNECT_ISSUER_ID" \
             --type IOS_APP_STORE \
             --create
-          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles/
-          find . -name "*.mobileprovision" -exec cp {} ~/Library/MobileDevice/Provisioning\ Profiles/ \;
           keychain add-certificates
-          xcode-project use-profiles
+          PROFILE=$(ls ~/Library/MobileDevice/Provisioning\ Profiles/*.mobileprovision 2>/dev/null | grep -v '\*' | head -1)
+          if [ -z "$PROFILE" ]; then
+            echo "ERROR: No provisioning profile found after fetch"
+            ls ~/Library/MobileDevice/Provisioning\ Profiles/ 2>/dev/null || echo "Directory empty"
+            exit 1
+          fi
+          UUID=$(security cms -D -i "$PROFILE" | plutil -extract UUID xml1 -o - - | sed -n 's/.*<string>\(.*\)<\/string>.*/\1/p')
+          echo "Profile UUID: $UUID"
+          echo "PROFILE_UUID=$UUID" >> $CM_ENV
       - name: Build iOS
         script: |
           xcodebuild \
@@ -47,8 +53,9 @@ workflows:
             -configuration Release \
             -archivePath build/WaveTalk.xcarchive \
             archive \
-            CODE_SIGN_STYLE=Automatic \
-            DEVELOPMENT_TEAM=$APPLE_TEAM_ID
+            CODE_SIGN_STYLE=Manual \
+            DEVELOPMENT_TEAM=$APPLE_TEAM_ID \
+            PROVISIONING_PROFILE="$PROFILE_UUID"
       - name: Export IPA
         script: |
           xcodebuild -exportArchive \
