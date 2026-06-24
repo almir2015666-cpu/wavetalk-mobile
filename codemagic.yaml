@@ -31,12 +31,9 @@ workflows:
       - name: Set up code signing
         script: |
           keychain initialize
-          app-store-connect fetch-signing-files com.wavetalk.app \
-            --type IOS_APP_STORE \
-            --create
           keychain add-certificates
       - name: Configure Xcode signing
-        script: xcode-project use-profiles
+        script: cd ios && xcode-project use-profiles
       - name: Build IPA
         script: |
           xcode-project build-ipa \
