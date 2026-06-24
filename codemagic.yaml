@@ -30,6 +30,7 @@ workflows:
       - name: Set up code signing
         script: |
           keychain initialize
+          export APP_STORE_CONNECT_PRIVATE_KEY="$APP_STORE_CONNECT_API_KEY"
           app-store-connect fetch-signing-files com.wavetalk.app \
             --type IOS_APP_STORE \
             --create
