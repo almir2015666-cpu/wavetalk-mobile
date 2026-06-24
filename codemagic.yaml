@@ -6,10 +6,8 @@ workflows:
     environment:
       groups:
         - nutri
-      ios_signing:
-        distribution_type: app_store
-        bundle_identifier: com.wavetalk.app
       vars:
+        BUNDLE_ID: com.wavetalk.app
         XCODE_WORKSPACE: ios/WaveTalk.xcworkspace
         XCODE_SCHEME: WaveTalk
     triggering:
@@ -26,15 +24,22 @@ workflows:
         script: |
           cd ios
           pod install
+      - name: Set up signing
+        script: |
+          app-store-connect fetch-signing-files $BUNDLE_ID \
+            --type IOS_APP_STORE \
+            --create
+          keychain add-certificates
+          xcode-project use-profiles
       - name: Build iOS
         script: |
           xcodebuild \
-            -workspace ios/WaveTalk.xcworkspace \
-            -scheme WaveTalk \
+            -workspace "$XCODE_WORKSPACE" \
+            -scheme "$XCODE_SCHEME" \
             -configuration Release \
             -archivePath build/WaveTalk.xcarchive \
             archive \
-            CODE_SIGN_STYLE=Automatic \
+            CODE_SIGN_STYLE=Manual \
             DEVELOPMENT_TEAM=$APPLE_TEAM_ID
       - name: Export IPA
         script: |
