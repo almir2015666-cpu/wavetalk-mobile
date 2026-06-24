@@ -41,6 +41,7 @@ workflows:
             -archivePath build/WaveTalk.xcarchive \
             archive \
             CODE_SIGN_STYLE=Automatic \
+            CODE_SIGNING_IDENTITY="Apple Distribution" \
             DEVELOPMENT_TEAM=$APPLE_TEAM_ID \
             -allowProvisioningUpdates \
             -authenticationKeyPath /tmp/AuthKey.p8 \
