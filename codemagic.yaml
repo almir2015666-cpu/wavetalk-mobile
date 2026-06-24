@@ -9,6 +9,7 @@ workflows:
       vars:
         XCODE_WORKSPACE: ios/WaveTalk.xcworkspace
         XCODE_SCHEME: WaveTalk
+        APP_STORE_CONNECT_KEY_IDENTIFIER: C76269469G
     triggering:
       events:
         - push
@@ -33,13 +34,7 @@ workflows:
             --type IOS_APP_STORE \
             --create
           keychain add-certificates
-          echo "=== Profiles downloaded ==="
-          ls -la "$HOME/Library/MobileDevice/Provisioning Profiles/" 2>/dev/null || echo "EMPTY"
-          echo "=== Before use-profiles ==="
-          grep "CODE_SIGN\|PROVISIONING" ios/WaveTalk.xcodeproj/project.pbxproj | head -20
           cd ios && xcode-project use-profiles
-          echo "=== After use-profiles ==="
-          grep "CODE_SIGN\|PROVISIONING" WaveTalk.xcodeproj/project.pbxproj | head -20
       - name: Build iOS
         script: |
           xcodebuild \
