@@ -25,6 +25,10 @@ workflows:
         script: |
           cd ios
           pod install
+      - name: Set build number
+        script: |
+          cd ios
+          agvtool new-version -all $BUILD_NUMBER
       - name: Remove push notification entitlement
         script: |
           /usr/libexec/PlistBuddy -c "Delete :aps-environment" ios/WaveTalk/WaveTalk.entitlements 2>/dev/null || true
