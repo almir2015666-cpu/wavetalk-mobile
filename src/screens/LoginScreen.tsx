@@ -22,6 +22,8 @@ export default function LoginScreen({ onEnter, loading, savedName }: Props) {
   const logoOp   = useRef(new Animated.Value(0)).current;
   const formOp   = useRef(new Animated.Value(0)).current;
   const glowAnim = useRef(new Animated.Value(0)).current;
+  const pulse1   = useRef(new Animated.Value(0)).current;
+  const pulse2   = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     Animated.sequence([
@@ -38,6 +40,16 @@ export default function LoginScreen({ onEnter, loading, savedName }: Props) {
         Animated.timing(glowAnim, { toValue: 0, duration: 3000, useNativeDriver: false }),
       ])
     ).start();
+
+    // Pulse rings — staggered by half a cycle
+    Animated.loop(
+      Animated.timing(pulse1, { toValue: 1, duration: 2000, useNativeDriver: true })
+    ).start();
+    setTimeout(() => {
+      Animated.loop(
+        Animated.timing(pulse2, { toValue: 1, duration: 2000, useNativeDriver: true })
+      ).start();
+    }, 1000);
   }, []);
 
   const canEnter = name.trim().length >= 2;
@@ -61,8 +73,20 @@ export default function LoginScreen({ onEnter, loading, savedName }: Props) {
       >
         {/* Logo area */}
         <Animated.View style={[s.logoArea, { paddingTop: insets.top + 40, opacity: logoOp, transform: [{ translateY: logoY }] }]}>
-          <View style={s.iconWrap}>
-            <MicSVG color={C.cyan} />
+          <View style={{ alignItems: 'center', justifyContent: 'center' }}>
+            {/* Pulse ring 1 */}
+            <Animated.View style={[s.pulseRing, {
+              opacity:   pulse1.interpolate({ inputRange: [0, 0.3, 1], outputRange: [0, 0.55, 0] }),
+              transform: [{ scale: pulse1.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1.90] }) }],
+            }]} />
+            {/* Pulse ring 2 */}
+            <Animated.View style={[s.pulseRing, {
+              opacity:   pulse2.interpolate({ inputRange: [0, 0.3, 1], outputRange: [0, 0.55, 0] }),
+              transform: [{ scale: pulse2.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1.90] }) }],
+            }]} />
+            <View style={s.iconWrap}>
+              <MicSVG color={C.cyan} />
+            </View>
           </View>
           <Text style={s.appName}>WaveTalk</Text>
           <Text style={s.tagline}>Fale agora. Seja ouvido.</Text>
@@ -148,12 +172,17 @@ const s = StyleSheet.create({
   logoArea: {
     flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16, paddingHorizontal: 24,
   },
+  pulseRing: {
+    position: 'absolute',
+    width: 88, height: 88, borderRadius: 26,
+    backgroundColor: C.cyan,
+  },
   iconWrap: {
     width: 88, height: 88, borderRadius: 26, backgroundColor: C.card,
-    borderWidth: 1.5, borderColor: C.border2,
+    borderWidth: 1.5, borderColor: C.cyan + '88',
     alignItems: 'center', justifyContent: 'center',
-    shadowColor: C.cyan, shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.35, shadowRadius: 24,
-    elevation: 8,
+    shadowColor: C.cyan, shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.5, shadowRadius: 28,
+    elevation: 12,
   },
   appName: { fontSize: 40, fontWeight: '900', color: C.text, letterSpacing: -1.5 },
   tagline: { fontSize: 15, color: C.text2, letterSpacing: 0.2 },
