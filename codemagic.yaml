@@ -31,55 +31,19 @@ workflows:
       - name: Set up code signing
         script: |
           keychain initialize
-          echo "$CM_CERTIFICATE" | base64 --decode > /tmp/cert.p12
-          keychain add-certificates --certificate /tmp/cert.p12 --certificate-password "$CM_CERTIFICATE_PASSWORD"
+          export APP_STORE_CONNECT_KEY_IDENTIFIER="$APP_STORE_CONNECT_KEY_ID"
+          export APP_STORE_CONNECT_PRIVATE_KEY="$APP_STORE_CONNECT_API_KEY"
+          app-store-connect fetch-signing-files com.wavetalk.app \
+            --type IOS_APP_STORE \
+            --create
+          keychain add-certificates
+      - name: Configure Xcode signing
+        script: xcode-project use-profiles
       - name: Build IPA
         script: |
-          # Install provisioning profile
-          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
-          echo "$CM_PROVISIONING_PROFILE" | base64 --decode > /tmp/wavetalk.mobileprovision
-          UUID=$(grep -aEo '[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}' /tmp/wavetalk.mobileprovision | head -1)
-          echo "Profile UUID: $UUID"
-          cp /tmp/wavetalk.mobileprovision "$HOME/Library/MobileDevice/Provisioning Profiles/${UUID}.mobileprovision"
-          ls "$HOME/Library/MobileDevice/Provisioning Profiles/"
-
-          # Export options
-          mkdir -p build/ios/ipa
-          cat > /tmp/ExportOptions.plist << 'EOPLIST'
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-            <key>method</key>
-            <string>app-store</string>
-            <key>teamID</key>
-            <string>66U94U6Q5H</string>
-            <key>provisioningProfiles</key>
-            <dict>
-              <key>com.wavetalk.app</key>
-              <string>wavetalk-appstore</string>
-            </dict>
-          </dict>
-          </plist>
-          EOPLIST
-
-          # Archive
-          xcodebuild \
-            -workspace "$XCODE_WORKSPACE" \
-            -scheme "$XCODE_SCHEME" \
-            -configuration Release \
-            -archivePath build/ios/ipa/WaveTalk.xcarchive \
-            CODE_SIGN_STYLE=Manual \
-            CODE_SIGN_IDENTITY="Apple Distribution" \
-            PROVISIONING_PROFILE="$UUID" \
-            DEVELOPMENT_TEAM=66U94U6Q5H \
-            archive
-
-          # Export IPA
-          xcodebuild -exportArchive \
-            -archivePath build/ios/ipa/WaveTalk.xcarchive \
-            -exportPath build/ios/ipa/ \
-            -exportOptionsPlist /tmp/ExportOptions.plist
+          xcode-project build-ipa \
+            --workspace "$XCODE_WORKSPACE" \
+            --scheme "$XCODE_SCHEME"
     artifacts:
       - build/ios/ipa/*.ipa
     publishing:
