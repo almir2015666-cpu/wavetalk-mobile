@@ -31,11 +31,13 @@ app.get('/', (_req, res) => {
    users    : Map<socketId, { id, name, channel, talking, talkStart }>
    talking  : Map<channelKey, socketId | null>
 ──────────────────────────────────────────────────────────────── */
-const channels = new Map();
-const users    = new Map();
-const talking  = new Map();
+const channels    = new Map();
+const users       = new Map();
+const talking     = new Map();
+const channelPins = new Map(); // channelKey → pin (string)
 
 const DEFAULT_CHANNELS = ['geral-1', 'geral-2', 'geral-3', 'geral-4'];
+const CHANNEL_MAX      = 20;
 
 function boot() {
   DEFAULT_CHANNELS.forEach(ch => {
@@ -92,7 +94,10 @@ app.get('/api/stats', (_req, res) => {
 
 app.get('/api/channels', (_req, res) => {
   res.json([...channels.entries()].map(([k, s]) => ({
-    name: k, online: s.size, talking: talking.get(k) || null,
+    name: k, online: s.size, max: CHANNEL_MAX,
+    talking: talking.get(k) || null,
+    hasPin: channelPins.has(k),
+    isFull: s.size >= CHANNEL_MAX,
   })));
 });
 
@@ -101,9 +106,27 @@ io.on('connection', (socket) => {
   console.log(`[+] ${socket.id} connected`);
 
   /* ── JOIN ── */
-  socket.on('join', ({ name, channel }) => {
+  socket.on('join', ({ name, channel, pin, channelPin }) => {
     const userName   = (name    || 'Anônimo').trim().slice(0, 40);
-    const channelKey = getOrCreate(channel || 'geral');
+    const channelKey = getOrCreate(channel || 'geral-1');
+
+    // Capacity check
+    if (channels.get(channelKey).size >= CHANNEL_MAX) {
+      socket.emit('join:rejected', { reason: 'full', channel: channelKey });
+      return;
+    }
+
+    // PIN check — only for channels that have a PIN set
+    if (channelPins.has(channelKey)) {
+      if (pin !== channelPins.get(channelKey)) {
+        socket.emit('join:rejected', { reason: 'pin', channel: channelKey });
+        return;
+      }
+    }
+    // Set PIN if creator provided one and channel is new
+    if (channelPin && !channelPins.has(channelKey)) {
+      channelPins.set(channelKey, String(channelPin).slice(0, 6));
+    }
 
     const prev = users.get(socket.id);
     if (prev && prev.channel !== channelKey) leaveChannel(socket, prev.channel);

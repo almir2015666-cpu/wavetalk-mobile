@@ -16,6 +16,7 @@ export interface SocketCallbacks {
   onPing:          (ms: number) => void;
   onConnect:       () => void;
   onDisconnect:    () => void;
+  onJoinRejected?: (reason: string, channel: string) => void;
 }
 
 export function useSocket(callbacks: SocketCallbacks) {
@@ -54,6 +55,7 @@ export function useSocket(callbacks: SocketCallbacks) {
     s.on('ptt:blocked',    ({ by }: any)                   => cbRef.current.onPttBlocked(by));
     s.on('audio:recv',     ({ data, from, name }: any)     => cbRef.current.onAudioRecv(data, from, name));
     s.on('pong:server',    (ts: number)                    => cbRef.current.onPing(Date.now() - ts));
+    s.on('join:rejected',  ({ reason, channel }: any)      => cbRef.current.onJoinRejected?.(reason, channel));
 
     return () => {
       clearInterval(pingTimer.current!);
@@ -61,7 +63,7 @@ export function useSocket(callbacks: SocketCallbacks) {
     };
   }, []);
 
-  const join      = useCallback((name: string, channel: string) => socketRef.current?.emit('join',      { name, channel }), []);
+  const join      = useCallback((name: string, channel: string, pin?: string, channelPin?: string) => socketRef.current?.emit('join', { name, channel, pin, channelPin }), []);
   const pttStart  = useCallback(() => socketRef.current?.emit('ptt:start'), []);
   const pttStop   = useCallback(() => socketRef.current?.emit('ptt:stop'),  []);
   const sendAudio = useCallback((data: string) => socketRef.current?.emit('audio:send', { data }), []);

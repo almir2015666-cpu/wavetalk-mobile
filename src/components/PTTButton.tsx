@@ -3,15 +3,26 @@ import { View, Text, Animated, PanResponder, StyleSheet } from 'react-native';
 import { C } from '../theme';
 
 interface Props {
-  talking:  boolean;
-  disabled: boolean;
-  onStart:  () => void;
-  onStop:   () => void;
+  talking:          boolean;
+  disabled:         boolean;
+  locked:           boolean;
+  talkSeconds:      number; // 0–60
+  onStart:          () => void;
+  onStop:           () => void;
 }
 
 const BTN = 180;
+const MAX_SECS = 60;
 
-export default function PTTButton({ talking, disabled, onStart, onStop }: Props) {
+// Color interpolation based on elapsed seconds
+function talkColor(secs: number): string {
+  if (secs < 30) return C.green;
+  if (secs < 45) return C.cyan;
+  if (secs < 55) return C.orange;
+  return C.red;
+}
+
+export default function PTTButton({ talking, disabled, locked, talkSeconds, onStart, onStop }: Props) {
   const scale  = useRef(new Animated.Value(1)).current;
   const glow   = useRef(new Animated.Value(0)).current;
   const ring1  = useRef(new Animated.Value(0)).current;
@@ -20,6 +31,8 @@ export default function PTTButton({ talking, disabled, onStart, onStop }: Props)
   const idleP  = useRef(new Animated.Value(1)).current;
   const ringLoop = useRef<Animated.CompositeAnimation | null>(null);
   const idleLoop = useRef<Animated.CompositeAnimation | null>(null);
+
+  const activeColor = talking ? talkColor(talkSeconds) : C.cyan;
 
   useEffect(() => {
     if (talking) {
@@ -64,27 +77,40 @@ export default function PTTButton({ talking, disabled, onStart, onStop }: Props)
     position: 'absolute' as const,
     width: size, height: size, borderRadius: size / 2,
     borderWidth: 1.5,
-    borderColor: C.green,
+    borderColor: activeColor,
     opacity: anim.interpolate({ inputRange: [0, 0.2, 1], outputRange: [0, 0.5, 0] }),
     transform: [{ scale: anim.interpolate({ inputRange: [0, 1], outputRange: [0.75, 1.2] }) }],
   });
 
   const disabledRef = useRef(disabled);
+  const lockedRef   = useRef(locked);
   const onStartRef  = useRef(onStart);
   const onStopRef   = useRef(onStop);
   useEffect(() => { disabledRef.current = disabled; }, [disabled]);
+  useEffect(() => { lockedRef.current   = locked;   }, [locked]);
   useEffect(() => { onStartRef.current  = onStart;  }, [onStart]);
   useEffect(() => { onStopRef.current   = onStop;   }, [onStop]);
 
   const pan = useRef(PanResponder.create({
     onStartShouldSetPanResponder: () => !disabledRef.current,
-    onPanResponderGrant:          () => onStartRef.current(),
-    onPanResponderRelease:        () => onStopRef.current(),
-    onPanResponderTerminate:      () => onStopRef.current(),
+    onPanResponderGrant: () => {
+      if (lockedRef.current) {
+        onStopRef.current(); // tap to unlock
+      } else {
+        onStartRef.current();
+      }
+    },
+    onPanResponderRelease:   () => { if (!lockedRef.current) onStopRef.current(); },
+    onPanResponderTerminate: () => { if (!lockedRef.current) onStopRef.current(); },
   })).current;
 
-  const color  = talking ? C.green : C.cyan;
-  const bgTint = talking ? 'rgba(0,240,128,0.10)' : disabled ? C.surface : 'rgba(0,204,255,0.06)';
+  const bgTint = talking
+    ? `${activeColor}18`
+    : disabled ? C.surface : 'rgba(0,204,255,0.06)';
+
+  // Progress bar fill width (0–BTN px over 60s)
+  const progressWidth = Math.min(talkSeconds / MAX_SECS, 1) * BTN;
+  const progressColor = talkColor(talkSeconds);
 
   return (
     <View style={s.wrap}>
@@ -96,24 +122,36 @@ export default function PTTButton({ talking, disabled, onStart, onStop }: Props)
       {/* Outer glow */}
       <Animated.View pointerEvents="none" style={[s.glowRing, {
         opacity: glow,
-        shadowColor: C.green,
+        shadowColor: activeColor,
       }]} />
 
       {/* Button */}
       <Animated.View
         style={[s.btn, {
           backgroundColor: bgTint,
-          borderColor: disabled ? C.border : color,
+          borderColor: disabled ? C.border : activeColor,
           borderWidth: talking ? 3 : 2,
           transform: [{ scale: Animated.multiply(scale, disabled ? new Animated.Value(1) : idleP) }],
           opacity: disabled ? 0.38 : 1,
-          shadowColor: color,
+          shadowColor: activeColor,
           shadowOpacity: talking ? 0.55 : 0.2,
         }]}
         {...pan.panHandlers}
       >
-        <MicIcon color={disabled ? C.text3 : color} size={44} />
+        {locked && !talking
+          ? <Text style={{ fontSize: 36 }}>🔒</Text>
+          : locked && talking
+          ? <Text style={{ fontSize: 28, color: activeColor }}>🔒</Text>
+          : <MicIcon color={disabled ? C.text3 : activeColor} size={44} />
+        }
       </Animated.View>
+
+      {/* 60s progress bar */}
+      {talking && (
+        <View style={[s.progressTrack, { width: BTN }]}>
+          <View style={[s.progressFill, { width: progressWidth, backgroundColor: progressColor }]} />
+        </View>
+      )}
     </View>
   );
 }
@@ -142,7 +180,7 @@ const s = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  ring: { position: 'absolute', alignSelf: 'center' },
+  ring:    { position: 'absolute', alignSelf: 'center' },
   glowRing: {
     position: 'absolute',
     width: BTN + 20, height: BTN + 20, borderRadius: (BTN + 20) / 2,
@@ -153,5 +191,15 @@ const s = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
     shadowOffset: { width: 0, height: 6 }, shadowRadius: 24,
     elevation: 14,
+  },
+  progressTrack: {
+    position: 'absolute',
+    bottom: (BTN + 200) / 2 - BTN / 2 - 8,
+    height: 3, borderRadius: 2,
+    backgroundColor: C.border2,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: 3, borderRadius: 2,
   },
 });

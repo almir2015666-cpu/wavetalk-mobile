@@ -9,12 +9,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { C } from '../theme';
 
 interface Props {
-  onEnter: (name: string) => void;
-  loading: boolean;
+  onEnter:    (name: string) => void;
+  loading:    boolean;
+  savedName?: string;
 }
 
-export default function LoginScreen({ onEnter, loading }: Props) {
-  const [name, setName] = useState('');
+export default function LoginScreen({ onEnter, loading, savedName }: Props) {
+  const [name, setName] = useState(savedName ?? '');
   const insets = useSafeAreaInsets();
 
   const logoY    = useRef(new Animated.Value(24)).current;

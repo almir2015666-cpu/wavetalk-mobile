@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  Animated, Modal, ActivityIndicator,
+  Animated, Modal, ActivityIndicator, Share,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
@@ -18,13 +18,34 @@ import Visualizer          from '../components/Visualizer';
 import { C, avatarColor }  from '../theme';
 import { SERVER_URL }      from '../config';
 
-interface LogItem { id: string; name: string; duration: string; ts: string; audio?: string }
+const MAX_TALK_SECS  = 60;
+const CHANNEL_MAX    = 20;
 
-interface Channel { name: string; online: number; talking: boolean }
+function fmtMs(ms: number): string {
+  const s = Math.floor(ms / 1000);
+  const m = Math.floor(s / 60);
+  const h = Math.floor(m / 60);
+  if (h > 0) return `${h}h ${m % 60}min`;
+  if (m > 0) return `${m}min`;
+  return `${s}s`;
+}
+
+function fmtElapsed(ms: number): string {
+  const m = Math.floor(ms / 60000);
+  const h = Math.floor(m / 60);
+  if (h > 0) return `${h}h ${m % 60}min`;
+  if (m > 0) return `${m}min`;
+  return 'agora';
+}
+
+interface LogItem { id: string; name: string; duration: string; ts: string; audio?: string }
+interface Channel  { name: string; online: number; talking: boolean; hasPin?: boolean; isFull?: boolean }
 
 interface Props {
   myName:          string;
   myChannel:       string;
+  myPin?:          string;
+  myChannelPin?:   string;
   onLogout:        () => void;
   onSwitchChannel: () => void;
 }
@@ -33,7 +54,7 @@ const ICONS: Record<string, string> = {
   'geral-1': '📻', 'geral-2': '📻', 'geral-3': '📻', 'geral-4': '📻',
 };
 
-export default function MainScreen({ myName, myChannel: initChannel, onLogout, onSwitchChannel }: Props) {
+export default function MainScreen({ myName, myChannel: initChannel, myPin, myChannelPin, onLogout, onSwitchChannel }: Props) {
   const insets = useSafeAreaInsets();
   const [connected,    setConnected]    = useState(false);
   const [reconnecting, setReconnecting] = useState(false);
@@ -41,21 +62,36 @@ export default function MainScreen({ myName, myChannel: initChannel, onLogout, o
   const [channel,      setChannel]      = useState(initChannel);
   const [talkerId,     setTalkerId]     = useState<string | null>(null);
   const [talking,      setTalking]      = useState(false);
+  const [locked,       setLocked]       = useState(false);
+  const [talkSeconds,  setTalkSeconds]  = useState(0);
   const [muted,        setMuted]        = useState(false);
   const [hasMic,       setHasMic]       = useState(false);
   const [log,          setLog]          = useState<LogItem[]>([]);
   const [ping,         setPing]         = useState('—');
   const [speakerName,  setSpeakerName]  = useState('');
   const [isPlaying,    setIsPlaying]    = useState(false);
+  const [channelTime,  setChannelTime]  = useState('agora');
+  const [fullBanner,   setFullBanner]   = useState(false);
 
   // Channel switch modal
   const [chModalOpen,    setChModalOpen]    = useState(false);
   const [chModalData,    setChModalData]    = useState<Channel[]>([]);
   const [chModalLoading, setChModalLoading] = useState(false);
 
+  // Session stats modal
+  const [statsOpen,     setStatsOpen]    = useState(false);
+  const [pendingExit,   setPendingExit]  = useState<'logout' | 'switch' | null>(null);
+
   const bannerAnim = useRef(new Animated.Value(0)).current;
   const myId       = useRef('');
   const talkStart  = useRef(0);
+  const talkTimer  = useRef<ReturnType<typeof setInterval> | null>(null);
+  const joinTimeRef = useRef(0);
+  const clockTimer  = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Session stats (refs — no re-render needed during session)
+  const sessionTxCount  = useRef(0);
+  const sessionTalkMs   = useRef(0);
 
   useKeepAwake();
   const audio     = useAudio(setIsPlaying);
@@ -64,6 +100,19 @@ export default function MainScreen({ myName, myChannel: initChannel, onLogout, o
 
   useEffect(() => { audio.requestPermission().then(ok => setHasMic(ok)); }, []);
 
+  // ── Channel time clock ─────────────────────────────────────────────
+  const startClock = useCallback(() => {
+    joinTimeRef.current = Date.now();
+    setChannelTime('agora');
+    if (clockTimer.current) clearInterval(clockTimer.current);
+    clockTimer.current = setInterval(() => {
+      setChannelTime(fmtElapsed(Date.now() - joinTimeRef.current));
+    }, 30_000);
+  }, []);
+
+  useEffect(() => () => { if (clockTimer.current) clearInterval(clockTimer.current); }, []);
+
+  // ── Banner helpers ─────────────────────────────────────────────────
   const showBanner = useCallback((name: string) => {
     setSpeakerName(name);
     Animated.spring(bannerAnim, { toValue: 1, useNativeDriver: true, speed: 18, bounciness: 5 }).start();
@@ -73,7 +122,6 @@ export default function MainScreen({ myName, myChannel: initChannel, onLogout, o
     Animated.timing(bannerAnim, { toValue: 0, duration: 200, useNativeDriver: true }).start();
   }, []);
 
-  // Race condition fix: pttStop can arrive before or after audioRecv
   const pendingStopRef  = useRef<Record<string, { name: string; duration: string }>>({});
   const pendingAudioRef = useRef<Record<string, string>>({});
 
@@ -84,27 +132,33 @@ export default function MainScreen({ myName, myChannel: initChannel, onLogout, o
 
   const { join, pttStart, pttStop, sendAudio, getId } = useSocket({
     onConnect: () => {
-      setConnected(true);
-      setReconnecting(false);
+      setConnected(true); setReconnecting(false); setFullBanner(false);
       myId.current = getId();
-      join(myName, channel);
+      join(myName, channel, myPin, myChannelPin);
+      startClock();
     },
     onDisconnect: () => {
-      setConnected(false);
-      setReconnecting(true);
-      setTalkerId(null);
-      hideBanner();
+      setConnected(false); setReconnecting(true);
+      setTalkerId(null); hideBanner();
     },
-    onJoined: (list) => { myId.current = getId(); setUsers(list); },
+    onJoined:        (list) => { myId.current = getId(); setUsers(list); },
     onChannelUpdate: (list, talker) => {
       setUsers(list); setTalkerId(talker);
       if (talker && talker !== myId.current) {
         const u = list.find(u => u.id === talker);
-        if (u) showBanner(u.name);
+        if (u) {
+          showBanner(u.name);
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+        }
       } else if (!talker) hideBanner();
     },
-    onPttStart: (userId, name) => { if (userId !== myId.current) showBanner(name); },
-    onPttStop: (userId, name, duration) => {
+    onPttStart:  (userId, name) => {
+      if (userId !== myId.current) {
+        showBanner(name);
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+      }
+    },
+    onPttStop:   (userId, name, duration) => {
       if (userId !== myId.current) {
         hideBanner();
         const audioData = pendingAudioRef.current[userId];
@@ -116,8 +170,13 @@ export default function MainScreen({ myName, myChannel: initChannel, onLogout, o
         }
       }
     },
-    onPttBlocked: () => setTalking(false),
-    onAudioRecv: (data, from, name) => {
+    onPttBlocked: () => {
+      setTalking(false); setLocked(false); clearTalkTimer();
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+    },
+    onAudioRecv:  (data, from, name) => {
+      // Stronger haptic for incoming audio — distinct from UI taps
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
       notifyIncoming(name);
       audio.playAudio(data).catch(() => {});
       const pending = pendingStopRef.current[from];
@@ -128,22 +187,52 @@ export default function MainScreen({ myName, myChannel: initChannel, onLogout, o
         pendingAudioRef.current[from] = data;
       }
     },
-    onPing: (ms) => setPing(ms + 'ms'),
+    onPing:        (ms) => setPing(ms + 'ms'),
+    onJoinRejected: (reason) => {
+      if (reason === 'full') {
+        setFullBanner(true);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
+      }
+    },
   });
 
+  // ── 60s talk timer ────────────────────────────────────────────────
+  const clearTalkTimer = useCallback(() => {
+    if (talkTimer.current) { clearInterval(talkTimer.current); talkTimer.current = null; }
+    setTalkSeconds(0);
+  }, []);
+
+  const startTalkTimer = useCallback(() => {
+    clearTalkTimer();
+    setTalkSeconds(0);
+    talkTimer.current = setInterval(() => {
+      setTalkSeconds(prev => {
+        if (prev + 1 >= MAX_TALK_SECS) { stopTalking(); return MAX_TALK_SECS; }
+        return prev + 1;
+      });
+    }, 1000);
+  }, []);
+
+  // ── PTT actions ───────────────────────────────────────────────────
   const startTalking = useCallback(async () => {
     if (talking || !connected) return;
     setTalking(true);
     talkStart.current = Date.now();
+    sessionTxCount.current += 1;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     pttSounds.playStart();
     pttStart();
+    startTalkTimer();
     if (hasMic && !muted) await audio.startRecording();
   }, [talking, connected, hasMic, muted]);
 
   const stopTalking = useCallback(async () => {
     if (!talking) return;
     setTalking(false);
+    setLocked(false);
+    clearTalkTimer();
+    const dur = Date.now() - talkStart.current;
+    sessionTalkMs.current += dur;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
     pttSounds.playStop();
     pttStop();
@@ -151,34 +240,67 @@ export default function MainScreen({ myName, myChannel: initChannel, onLogout, o
       const b64 = await audio.stopRecording();
       if (b64) sendAudio(b64);
     }
-    const dur = Math.round((Date.now() - talkStart.current) / 1000);
-    addLog(myName, `${Math.floor(dur / 60)}:${String(dur % 60).padStart(2, '0')}`);
+    const durS = Math.round(dur / 1000);
+    addLog(myName, `${Math.floor(durS / 60)}:${String(durS % 60).padStart(2, '0')}`);
   }, [talking, hasMic, muted, myName]);
+
+  // Lock = keep transmitting
+  const toggleLock = useCallback(async () => {
+    if (locked) { setLocked(false); await stopTalking(); }
+    else        { setLocked(true);  await startTalking(); }
+  }, [locked, talking, connected]);
+
+  // Share channel
+  const shareChannel = useCallback(() => {
+    Share.share({
+      message: `Entre no canal "${channel}" no WaveTalk! Baixe o app e escolha o canal "${channel}" para falar comigo.`,
+      title:   `Canal ${channel} - WaveTalk`,
+    }).catch(() => {});
+  }, [channel]);
+
+  // ── Exit with stats ───────────────────────────────────────────────
+  const requestExit = useCallback((type: 'logout' | 'switch') => {
+    const hasStats = sessionTxCount.current > 0 || (Date.now() - joinTimeRef.current) > 60_000;
+    if (hasStats) {
+      setPendingExit(type);
+      setStatsOpen(true);
+    } else {
+      type === 'logout' ? onLogout() : onSwitchChannel();
+    }
+  }, [onLogout, onSwitchChannel]);
+
+  const confirmExit = useCallback(() => {
+    setStatsOpen(false);
+    if (pendingExit === 'logout')  { onLogout(); }
+    if (pendingExit === 'switch')  { onSwitchChannel(); }
+    setPendingExit(null);
+  }, [pendingExit, onLogout, onSwitchChannel]);
 
   // Channel switch modal
   const openChModal = async () => {
     setChModalOpen(true);
     setChModalLoading(true);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 4000);
     try {
-      const res  = await fetch(`${SERVER_URL}/api/channels`, { signal: AbortSignal.timeout(4000) });
-      const data = await res.json();
-      setChModalData(data);
+      const res  = await fetch(`${SERVER_URL}/api/channels`, { signal: controller.signal });
+      setChModalData(await res.json());
     } catch {
       setChModalData([]);
     } finally {
+      clearTimeout(timeout);
       setChModalLoading(false);
     }
   };
 
-  const switchChannel = (newCh: string) => {
+  const switchChannel = (newCh: string, isFull?: boolean) => {
+    if (isFull) return;
     setChModalOpen(false);
     if (newCh === channel) return;
-    setChannel(newCh);
-    setUsers([]);
-    setLog([]);
-    setTalkerId(null);
-    hideBanner();
+    setChannel(newCh); setUsers([]); setLog([]); setTalkerId(null); hideBanner();
+    sessionTxCount.current = 0; sessionTalkMs.current = 0;
     join(myName, newCh);
+    startClock();
   };
 
   const myColors      = avatarColor(myName);
@@ -188,6 +310,10 @@ export default function MainScreen({ myName, myChannel: initChannel, onLogout, o
 
   const pttLabel = !connected
     ? 'Conectando…'
+    : fullBanner
+    ? 'Canal lotado'
+    : locked
+    ? 'Toque para parar'
     : muted
     ? 'Microfone mutado'
     : !hasMic
@@ -200,15 +326,21 @@ export default function MainScreen({ myName, myChannel: initChannel, onLogout, o
 
   const pttLabelColor = !connected
     ? C.orange
+    : fullBanner
+    ? C.red
+    : locked
+    ? C.green
     : muted
     ? C.purple
     : !hasMic
     ? C.red
-    : channelBusy
-    ? C.orange
-    : talking
-    ? C.green
-    : C.text3;
+    : channelBusy ? C.orange
+    : talking ? C.green : C.text3;
+
+  // Session stats for modal
+  const sessionMinutes   = Math.floor((Date.now() - joinTimeRef.current) / 60000);
+  const sessionTimeLabel = fmtElapsed(Date.now() - joinTimeRef.current);
+  const talkTimeLabel    = fmtMs(sessionTalkMs.current);
 
   return (
     <View style={[s.root, { paddingTop: insets.top }]}>
@@ -216,19 +348,24 @@ export default function MainScreen({ myName, myChannel: initChannel, onLogout, o
 
       {/* ── TOP BAR ── */}
       <View style={s.topbar}>
-        {/* Logout */}
-        <TouchableOpacity onPress={onLogout} style={s.topBtn} activeOpacity={0.7}>
+        <TouchableOpacity onPress={() => requestExit('logout')} style={s.topBtn} activeOpacity={0.7}>
           <Text style={s.topBtnText}>←</Text>
         </TouchableOpacity>
 
-        {/* Channel pill — tappable to switch */}
         <TouchableOpacity onPress={openChModal} activeOpacity={0.75} style={s.chPill}>
           <View style={[s.chDot, { backgroundColor: connected ? C.green : C.orange }]} />
-          <Text style={s.chName}># {channel}</Text>
+          <View>
+            <Text style={s.chName}># {channel}</Text>
+            <Text style={s.chTimer}>{channelTime} no canal</Text>
+          </View>
           <Text style={s.chCaret}>⌄</Text>
         </TouchableOpacity>
 
         <View style={{ flex: 1 }} />
+
+        <TouchableOpacity onPress={shareChannel} style={s.topBtn} activeOpacity={0.7}>
+          <Text style={s.topBtnText}>⬆</Text>
+        </TouchableOpacity>
 
         <View style={[s.pingBadge, { borderColor: connected ? C.border2 : C.orange }]}>
           <Text style={[s.pingText, { color: connected ? C.text2 : C.orange }]}>
@@ -241,8 +378,15 @@ export default function MainScreen({ myName, myChannel: initChannel, onLogout, o
         </LinearGradient>
       </View>
 
+      {/* ── FULL CHANNEL BANNER ── */}
+      {fullBanner && (
+        <View style={s.fullBanner}>
+          <Text style={s.fullBannerText}>Canal lotado ({CHANNEL_MAX}/{CHANNEL_MAX}) — tente outro canal</Text>
+        </View>
+      )}
+
       {/* ── RECONNECTING BANNER ── */}
-      {reconnecting && (
+      {reconnecting && !fullBanner && (
         <View style={s.reconnBanner}>
           <ActivityIndicator size="small" color={C.orange} />
           <Text style={s.reconnText}>Reconectando…</Text>
@@ -334,42 +478,52 @@ export default function MainScreen({ myName, myChannel: initChannel, onLogout, o
           </TouchableOpacity>
         )}
 
-        {/* PTT Button (centered) */}
         <PTTButton
           talking={talking}
-          disabled={!connected || channelBusy}
+          disabled={!connected || fullBanner || (channelBusy && !talking)}
+          locked={locked}
+          talkSeconds={talkSeconds}
           onStart={startTalking}
           onStop={stopTalking}
         />
 
-        {/* Mute + label row */}
+        {/* Mute button — full width, very visible */}
+        <TouchableOpacity
+          style={[s.muteBar, muted && s.muteBarActive]}
+          onPress={() => {
+            setMuted(m => !m);
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+          }}
+          activeOpacity={0.75}
+        >
+          <Text style={s.muteBarIcon}>{muted ? '🔇' : '🎤'}</Text>
+          <Text style={[s.muteBarLabel, muted && s.muteBarLabelActive]}>
+            {muted ? 'MUTADO — toque para ativar' : 'Microfone ativo — toque para mutar'}
+          </Text>
+        </TouchableOpacity>
+
+        {/* PTT label + lock */}
         <View style={s.pttBottom}>
+          <Text style={[s.pttLabel, { color: pttLabelColor, flex: 1, textAlign: 'center' }]}>{pttLabel}</Text>
+
           <TouchableOpacity
-            style={[s.muteBtn, muted && s.muteBtnActive]}
-            onPress={() => {
-              setMuted(m => !m);
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-            }}
+            style={[s.ctrlBtn, locked && s.ctrlBtnGreen]}
+            onPress={toggleLock}
+            disabled={!connected || fullBanner || (channelBusy && !locked)}
             activeOpacity={0.75}
           >
-            <Text style={s.muteBtnIcon}>{muted ? '🔇' : '🎤'}</Text>
+            <Text style={s.ctrlBtnIcon}>{locked ? '🔒' : '🔓'}</Text>
           </TouchableOpacity>
-          <Text style={[s.pttLabel, { color: pttLabelColor }]}>{pttLabel}</Text>
         </View>
+
+        {talking && talkSeconds >= 50 && (
+          <Text style={s.timerWarn}>{MAX_TALK_SECS - talkSeconds}s restantes</Text>
+        )}
       </View>
 
       {/* ── CHANNEL SWITCH MODAL ── */}
-      <Modal
-        visible={chModalOpen}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setChModalOpen(false)}
-      >
-        <TouchableOpacity
-          style={s.modalOverlay}
-          activeOpacity={1}
-          onPress={() => setChModalOpen(false)}
-        >
+      <Modal visible={chModalOpen} transparent animationType="slide" onRequestClose={() => setChModalOpen(false)}>
+        <TouchableOpacity style={s.modalOverlay} activeOpacity={1} onPress={() => setChModalOpen(false)}>
           <View style={s.modalSheet} onStartShouldSetResponder={() => true}>
             <View style={s.modalHandle} />
             <Text style={s.modalTitle}>Trocar de canal</Text>
@@ -381,35 +535,77 @@ export default function MainScreen({ myName, myChannel: initChannel, onLogout, o
                 {chModalData.length === 0 ? (
                   <Text style={s.modalEmpty}>Nenhum canal encontrado</Text>
                 ) : (
-                  chModalData.map(ch => (
-                    <TouchableOpacity
-                      key={ch.name}
-                      style={[s.modalChRow, ch.name === channel && s.modalChRowActive]}
-                      onPress={() => switchChannel(ch.name)}
-                      activeOpacity={0.75}
-                    >
-                      <Text style={s.modalChIcon}>{ICONS[ch.name] ?? '🔊'}</Text>
-                      <View style={{ flex: 1 }}>
-                        <Text style={s.modalChName}># {ch.name}</Text>
-                        <Text style={s.modalChMeta}>
-                          {ch.online === 0 ? 'Vazio' : `${ch.online} online`}
-                          {ch.talking ? ' · 🎙' : ''}
-                        </Text>
-                      </View>
-                      {ch.name === channel && (
-                        <Text style={{ color: C.cyan, fontWeight: '800', fontSize: 13 }}>atual</Text>
-                      )}
-                    </TouchableOpacity>
-                  ))
+                  chModalData.map(ch => {
+                    const isFull = ch.online >= CHANNEL_MAX;
+                    return (
+                      <TouchableOpacity
+                        key={ch.name}
+                        style={[s.modalChRow, ch.name === channel && s.modalChRowActive, isFull && s.modalChRowFull]}
+                        onPress={() => switchChannel(ch.name, isFull)}
+                        activeOpacity={isFull ? 1 : 0.75}
+                      >
+                        <Text style={s.modalChIcon}>{ICONS[ch.name] ?? '🔊'}</Text>
+                        <View style={{ flex: 1 }}>
+                          <Text style={s.modalChName}># {ch.name}</Text>
+                          <Text style={[s.modalChMeta, isFull && { color: C.red }]}>
+                            {isFull
+                              ? `Lotado (${ch.online}/${CHANNEL_MAX})`
+                              : ch.online === 0 ? 'Vazio' : `${ch.online}/${CHANNEL_MAX} online`}
+                            {!isFull && ch.talking ? ' · 🎙' : ''}
+                          </Text>
+                        </View>
+                        {ch.name === channel
+                          ? <Text style={{ color: C.cyan, fontWeight: '800', fontSize: 13 }}>atual</Text>
+                          : isFull
+                          ? <Text style={{ color: C.red, fontSize: 13 }}>🚫</Text>
+                          : null
+                        }
+                      </TouchableOpacity>
+                    );
+                  })
                 )}
               </ScrollView>
             )}
 
-            <TouchableOpacity style={s.modalNewBtn} onPress={() => { setChModalOpen(false); onSwitchChannel(); }}>
+            <TouchableOpacity style={s.modalNewBtn} onPress={() => { setChModalOpen(false); requestExit('switch'); }}>
               <Text style={s.modalNewBtnText}>+ Criar novo canal</Text>
             </TouchableOpacity>
           </View>
         </TouchableOpacity>
+      </Modal>
+
+      {/* ── SESSION STATS MODAL ── */}
+      <Modal visible={statsOpen} transparent animationType="fade" onRequestClose={() => setStatsOpen(false)}>
+        <View style={s.statsOverlay}>
+          <View style={s.statsSheet}>
+            <Text style={s.statsTitle}>Resumo da sessão</Text>
+            <Text style={s.statsSub}># {channel}</Text>
+
+            <View style={s.statsGrid}>
+              <View style={s.statBox}>
+                <Text style={s.statVal}>{sessionTimeLabel}</Text>
+                <Text style={s.statKey}>no canal</Text>
+              </View>
+              <View style={[s.statBox, s.statBoxMid]}>
+                <Text style={s.statVal}>{sessionTxCount.current}</Text>
+                <Text style={s.statKey}>{sessionTxCount.current === 1 ? 'transmissão' : 'transmissões'}</Text>
+              </View>
+              <View style={s.statBox}>
+                <Text style={s.statVal}>{sessionTalkMs.current < 1000 ? '—' : talkTimeLabel}</Text>
+                <Text style={s.statKey}>no ar</Text>
+              </View>
+            </View>
+
+            <View style={s.statsActions}>
+              <TouchableOpacity style={s.statsStay} onPress={() => { setStatsOpen(false); setPendingExit(null); }} activeOpacity={0.8}>
+                <Text style={s.statsStayText}>Ficar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={s.statsLeave} onPress={confirmExit} activeOpacity={0.8}>
+                <Text style={s.statsLeaveText}>Sair</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
       </Modal>
     </View>
   );
@@ -418,28 +614,35 @@ export default function MainScreen({ myName, myChannel: initChannel, onLogout, o
 const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: C.bg },
 
-  /* Top bar */
   topbar: {
-    height: 54, flexDirection: 'row', alignItems: 'center',
+    height: 58, flexDirection: 'row', alignItems: 'center',
     paddingHorizontal: 8, gap: 8,
     backgroundColor: C.surface, borderBottomWidth: 1, borderBottomColor: C.border,
   },
-  topBtn:     { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  topBtnText: { fontSize: 20, color: C.text2, fontWeight: '600' },
+  topBtn:     { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
+  topBtnText: { fontSize: 18, color: C.text2, fontWeight: '600' },
   chPill: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
-    backgroundColor: C.card, paddingHorizontal: 10, paddingVertical: 5,
+    backgroundColor: C.card, paddingHorizontal: 10, paddingVertical: 6,
     borderRadius: 99, borderWidth: 1, borderColor: C.border2,
   },
-  chDot:    { width: 6, height: 6, borderRadius: 3 },
-  chName:   { fontSize: 13, color: C.text2, fontWeight: '600' },
-  chCaret:  { fontSize: 11, color: C.text3 },
-  pingBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 99, borderWidth: 1 },
-  pingText:  { fontSize: 11, fontWeight: '600' },
-  myAvatar:  { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
+  chDot:   { width: 6, height: 6, borderRadius: 3 },
+  chName:  { fontSize: 13, color: C.text2, fontWeight: '700', lineHeight: 16 },
+  chTimer: { fontSize: 9,  color: C.text3, fontWeight: '500', lineHeight: 12 },
+  chCaret: { fontSize: 11, color: C.text3 },
+
+  pingBadge:    { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 99, borderWidth: 1 },
+  pingText:     { fontSize: 11, fontWeight: '600' },
+  myAvatar:     { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
   myAvatarText: { fontSize: 12, fontWeight: '800', color: '#fff' },
 
-  /* Reconnection banner */
+  fullBanner: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    backgroundColor: C.red + '18', borderBottomWidth: 1, borderBottomColor: C.red + '44',
+    paddingVertical: 8, paddingHorizontal: 16,
+  },
+  fullBannerText: { fontSize: 12, fontWeight: '700', color: C.red, textAlign: 'center' },
+
   reconnBanner: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
     backgroundColor: C.orange + '18', borderBottomWidth: 1, borderBottomColor: C.orange + '44',
@@ -447,14 +650,12 @@ const s = StyleSheet.create({
   },
   reconnText: { fontSize: 12, fontWeight: '700', color: C.orange },
 
-  /* Visualizer */
   vizWrap: {
     height: 60, justifyContent: 'center', alignItems: 'center',
     backgroundColor: C.surface, borderBottomWidth: 1, borderBottomColor: C.border,
   },
 
-  /* Speaker banner */
-  bannerWrap: { position: 'absolute', top: 54 + 60, left: 0, right: 0, zIndex: 10, alignItems: 'center', paddingTop: 8 },
+  bannerWrap: { position: 'absolute', top: 58 + 60, left: 0, right: 0, zIndex: 10, alignItems: 'center', paddingTop: 8 },
   banner: {
     flexDirection: 'row', alignItems: 'center', gap: 8,
     backgroundColor: '#00ff8818', borderWidth: 1, borderColor: C.green,
@@ -463,15 +664,10 @@ const s = StyleSheet.create({
   bannerDot:  { width: 8, height: 8, borderRadius: 4, backgroundColor: C.green },
   bannerText: { fontSize: 13, color: C.green, fontWeight: '700' },
 
-  /* Users row */
-  usersSection: {
-    paddingTop: 12, paddingBottom: 8,
-    borderBottomWidth: 1, borderBottomColor: C.border,
-  },
+  usersSection: { paddingTop: 12, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: C.border },
   sectionLabel: {
     fontSize: 10, fontWeight: '700', color: C.text3,
-    letterSpacing: 1.2, textTransform: 'uppercase',
-    paddingHorizontal: 16, marginBottom: 8,
+    letterSpacing: 1.2, textTransform: 'uppercase', paddingHorizontal: 16, marginBottom: 8,
   },
   usersRow:       { paddingHorizontal: 12, gap: 8 },
   userPill:       {
@@ -486,11 +682,10 @@ const s = StyleSheet.create({
   pillName:       { fontSize: 13, color: C.text2, fontWeight: '600', maxWidth: 70 },
   pillMic:        { fontSize: 11 },
 
-  /* Activity log */
   logSection: { flex: 1, paddingTop: 12 },
   logScroll:  { flex: 1, paddingHorizontal: 16 },
   logEmpty:   { fontSize: 13, color: C.text3, textAlign: 'center', marginTop: 24, lineHeight: 20 },
-  logItem: {
+  logItem:    {
     flexDirection: 'row', alignItems: 'center', gap: 10,
     paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: C.border,
   },
@@ -499,69 +694,87 @@ const s = StyleSheet.create({
   logInfo:       { flex: 1 },
   logName:       { fontSize: 14, fontWeight: '700', color: C.text },
   logMeta:       { fontSize: 12, color: C.text3, marginTop: 2 },
-  replayBtn: {
+  replayBtn:     {
     width: 32, height: 32, borderRadius: 16,
     backgroundColor: C.cyanDim, alignItems: 'center', justifyContent: 'center',
     borderWidth: 1, borderColor: C.cyan + '44',
   },
   replayIcon: { fontSize: 10, color: C.cyan },
 
-  /* PTT zone */
   pttZone: {
     alignItems: 'center', justifyContent: 'flex-end',
     borderTopWidth: 1, borderTopColor: C.border,
     backgroundColor: C.surface,
   },
-  micWarning: {
+  micWarning:     {
     marginTop: 12,
     backgroundColor: C.red + '18', borderWidth: 1, borderColor: C.red + '66',
     paddingHorizontal: 16, paddingVertical: 8, borderRadius: 99,
   },
   micWarningText: { fontSize: 12, color: C.red, fontWeight: '600' },
 
-  pttBottom: {
-    flexDirection: 'row', alignItems: 'center', gap: 10,
-    marginTop: -16, marginBottom: 8,
+  muteBar: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    marginTop: -12, marginHorizontal: 20, marginBottom: 4,
+    backgroundColor: C.card, borderWidth: 1.5, borderColor: C.border2,
+    borderRadius: 12, paddingHorizontal: 16, paddingVertical: 10,
   },
-  muteBtn: {
-    width: 38, height: 38, borderRadius: 19,
+  muteBarActive:      { backgroundColor: C.purple + '22', borderColor: C.purple },
+  muteBarIcon:        { fontSize: 20 },
+  muteBarLabel:       { fontSize: 12, fontWeight: '700', color: C.text2, flex: 1 },
+  muteBarLabelActive: { color: C.purple },
+
+  pttBottom: {
+    flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16,
+    marginBottom: 8,
+  },
+  ctrlBtn: {
+    width: 40, height: 40, borderRadius: 20,
     backgroundColor: C.card, borderWidth: 1.5, borderColor: C.border2,
     alignItems: 'center', justifyContent: 'center',
   },
-  muteBtnActive: { borderColor: C.purple, backgroundColor: C.purpleDim },
-  muteBtnIcon:   { fontSize: 18 },
+  ctrlBtnGreen:  { borderColor: C.green, backgroundColor: C.greenDim },
+  ctrlBtnIcon:   { fontSize: 18 },
 
-  pttLabel: {
-    fontSize: 13, fontWeight: '600', letterSpacing: 0.3,
-  },
+  pttLabel:  { fontSize: 13, fontWeight: '600', letterSpacing: 0.3 },
+  timerWarn: { fontSize: 11, color: C.red, fontWeight: '700', marginBottom: 4, marginTop: -4 },
 
-  /* Channel switch modal */
-  modalOverlay: {
-    flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end',
-  },
-  modalSheet: {
+  // Channel modal
+  modalOverlay:     { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
+  modalSheet:       {
     backgroundColor: C.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24,
     paddingTop: 12, paddingBottom: 32, paddingHorizontal: 20,
     borderTopWidth: 1, borderTopColor: C.border2,
   },
-  modalHandle: {
-    width: 40, height: 4, borderRadius: 2, backgroundColor: C.border2,
-    alignSelf: 'center', marginBottom: 20,
-  },
-  modalTitle: { fontSize: 17, fontWeight: '900', color: C.text, marginBottom: 16 },
-  modalEmpty: { fontSize: 13, color: C.text3, textAlign: 'center', marginVertical: 24 },
-  modalChRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: C.border,
-  },
+  modalHandle:      { width: 40, height: 4, borderRadius: 2, backgroundColor: C.border2, alignSelf: 'center', marginBottom: 20 },
+  modalTitle:       { fontSize: 17, fontWeight: '900', color: C.text, marginBottom: 16 },
+  modalEmpty:       { fontSize: 13, color: C.text3, textAlign: 'center', marginVertical: 24 },
+  modalChRow:       { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: C.border },
   modalChRowActive: { opacity: 0.6 },
-  modalChIcon: { fontSize: 22, width: 32, textAlign: 'center' },
-  modalChName: { fontSize: 14, fontWeight: '800', color: C.text },
-  modalChMeta: { fontSize: 12, color: C.text2, marginTop: 2 },
-  modalNewBtn: {
-    marginTop: 20, paddingVertical: 14, borderRadius: 12,
-    backgroundColor: C.cyanDim, borderWidth: 1, borderColor: C.cyan + '44',
-    alignItems: 'center',
+  modalChRowFull:   { opacity: 0.5 },
+  modalChIcon:      { fontSize: 22, width: 32, textAlign: 'center' },
+  modalChName:      { fontSize: 14, fontWeight: '800', color: C.text },
+  modalChMeta:      { fontSize: 12, color: C.text2, marginTop: 2 },
+  modalNewBtn:      { marginTop: 20, paddingVertical: 14, borderRadius: 12, backgroundColor: C.cyanDim, borderWidth: 1, borderColor: C.cyan + '44', alignItems: 'center' },
+  modalNewBtnText:  { fontSize: 14, fontWeight: '800', color: C.cyan },
+
+  // Stats modal
+  statsOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', justifyContent: 'center', paddingHorizontal: 24 },
+  statsSheet: {
+    backgroundColor: C.surface, borderRadius: 24,
+    paddingTop: 28, paddingBottom: 24, paddingHorizontal: 24,
+    borderWidth: 1, borderColor: C.border2,
   },
-  modalNewBtnText: { fontSize: 14, fontWeight: '800', color: C.cyan },
+  statsTitle: { fontSize: 20, fontWeight: '900', color: C.text, textAlign: 'center' },
+  statsSub:   { fontSize: 13, color: C.text3, textAlign: 'center', marginTop: 4, marginBottom: 24 },
+  statsGrid:  { flexDirection: 'row', gap: 1, marginBottom: 28 },
+  statBox:    { flex: 1, alignItems: 'center', gap: 4 },
+  statBoxMid: { borderLeftWidth: 1, borderRightWidth: 1, borderColor: C.border },
+  statVal:    { fontSize: 22, fontWeight: '900', color: C.cyan },
+  statKey:    { fontSize: 10, color: C.text3, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.8, textAlign: 'center' },
+  statsActions: { flexDirection: 'row', gap: 12 },
+  statsStay:    { flex: 1, paddingVertical: 14, borderRadius: 12, backgroundColor: C.card, borderWidth: 1, borderColor: C.border2, alignItems: 'center' },
+  statsStayText: { fontSize: 14, fontWeight: '700', color: C.text2 },
+  statsLeave:    { flex: 1, paddingVertical: 14, borderRadius: 12, backgroundColor: C.red + '22', borderWidth: 1, borderColor: C.red + '55', alignItems: 'center' },
+  statsLeaveText: { fontSize: 14, fontWeight: '800', color: C.red },
 });
