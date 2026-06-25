@@ -6,8 +6,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
-
 import { useKeepAwake } from 'expo-keep-awake';
+
 import { useSocket, User } from '../hooks/useSocket';
 import { useAudio } from '../hooks/useAudio';
 import { useBackground } from '../hooks/useBackground';
@@ -23,7 +23,7 @@ interface Props {
 }
 
 export default function MainScreen({ myName, myChannel: initChannel }: Props) {
-  const insets     = useSafeAreaInsets();
+  const insets = useSafeAreaInsets();
   const [connected,  setConnected]  = useState(false);
   const [users,      setUsers]      = useState<User[]>([]);
   const [channel,    setChannel]    = useState(initChannel);
@@ -32,20 +32,22 @@ export default function MainScreen({ myName, myChannel: initChannel }: Props) {
   const [hasMic,     setHasMic]     = useState(false);
   const [log,        setLog]        = useState<LogItem[]>([]);
   const [ping,       setPing]       = useState('—');
-  const [otherName,  setOtherName]  = useState('');
+  const [speakerName, setSpeakerName] = useState('');
   const [isPlaying,  setIsPlaying]  = useState(false);
-  const bannerAnim  = useRef(new Animated.Value(0)).current;
-  const myId        = useRef('');
-  const talkStart   = useRef(0);
-  useKeepAwake(); // keep screen on so app stays active for PTT
-  const audio       = useAudio(setIsPlaying);
+
+  const bannerAnim = useRef(new Animated.Value(0)).current;
+  const myId       = useRef('');
+  const talkStart  = useRef(0);
+
+  useKeepAwake();
+  const audio = useAudio(setIsPlaying);
   const { notifyIncoming } = useBackground();
 
   useEffect(() => { audio.requestPermission().then(ok => setHasMic(ok)); }, []);
 
   const showBanner = useCallback((name: string) => {
-    setOtherName(name);
-    Animated.spring(bannerAnim, { toValue: 1, useNativeDriver: true, speed: 16, bounciness: 6 }).start();
+    setSpeakerName(name);
+    Animated.spring(bannerAnim, { toValue: 1, useNativeDriver: true, speed: 18, bounciness: 5 }).start();
   }, []);
 
   const hideBanner = useCallback(() => {
@@ -60,33 +62,17 @@ export default function MainScreen({ myName, myChannel: initChannel }: Props) {
   }, []);
 
   const { join, pttStart, pttStop, sendAudio, getId } = useSocket({
-    onConnect: () => {
-      setConnected(true);
-      myId.current = getId();
-      join(myName, initChannel);
-    },
-    onDisconnect: () => {
-      setConnected(false);
-      setTalkerId(null);
-      hideBanner();
-    },
-    onJoined: (list) => {
-      myId.current = getId();
-      setUsers(list);
-    },
+    onConnect: () => { setConnected(true); myId.current = getId(); join(myName, initChannel); },
+    onDisconnect: () => { setConnected(false); setTalkerId(null); hideBanner(); },
+    onJoined: (list) => { myId.current = getId(); setUsers(list); },
     onChannelUpdate: (list, talker) => {
-      setUsers(list);
-      setTalkerId(talker);
+      setUsers(list); setTalkerId(talker);
       if (talker && talker !== myId.current) {
         const u = list.find(u => u.id === talker);
-        if (u) showBanner(u.name + ' está falando…');
-      } else if (!talker) {
-        hideBanner();
-      }
+        if (u) showBanner(u.name);
+      } else if (!talker) hideBanner();
     },
-    onPttStart: (userId, name) => {
-      if (userId !== myId.current) showBanner(name + ' está falando…');
-    },
+    onPttStart: (userId, name) => { if (userId !== myId.current) showBanner(name); },
     onPttStop: (userId, name, duration) => {
       if (userId !== myId.current) {
         hideBanner();
@@ -95,9 +81,7 @@ export default function MainScreen({ myName, myChannel: initChannel }: Props) {
         addLog(name, duration, saved);
       }
     },
-    onPttBlocked: () => {
-      setTalking(false);
-    },
+    onPttBlocked: () => setTalking(false),
     onAudioRecv: (data, from, name) => {
       lastAudioRef.current[from] = data;
       notifyIncoming(name);
@@ -128,244 +112,252 @@ export default function MainScreen({ myName, myChannel: initChannel }: Props) {
     addLog(myName, `${Math.floor(dur / 60)}:${String(dur % 60).padStart(2, '0')}`);
   }, [talking, hasMic, myName]);
 
-
-  const myInit        = (myName[0] || '?').toUpperCase();
   const myColors      = avatarColor(myName);
+  const myInit        = (myName[0] || '?').toUpperCase();
   const isPeerTalking = !!talkerId && talkerId !== myId.current;
   const channelBusy   = isPeerTalking || isPlaying;
 
-  return (
-    <View style={[styles.root, { paddingTop: insets.top }]}>
-      <StatusBar style="light"/>
+  const pttLabel = !connected
+    ? 'Conectando…'
+    : !hasMic
+    ? 'Microfone bloqueado'
+    : channelBusy
+    ? 'Canal ocupado'
+    : talking
+    ? 'Solte para enviar'
+    : 'Segurar para falar';
 
-      {/* TOP BAR */}
-      <View style={styles.topbar}>
-        <View style={styles.tbLogo}>
-          <View style={[styles.tbMicBody, { backgroundColor: C.cyan }]}/>
-          <Text style={styles.tbAppName}>WaveTalk</Text>
+  const pttLabelColor = !connected || channelBusy
+    ? C.orange
+    : !hasMic
+    ? C.red
+    : talking
+    ? C.green
+    : C.text3;
+
+  return (
+    <View style={[s.root, { paddingTop: insets.top }]}>
+      <StatusBar style="light" />
+
+      {/* ── TOP BAR ── */}
+      <View style={s.topbar}>
+        <View style={s.logoRow}>
+          <View style={s.logoMic} />
+          <Text style={s.logoText}>WaveTalk</Text>
         </View>
-        <View style={styles.tbChPill}>
-          <View style={styles.tbDot}/>
-          <Text style={styles.tbChName}># {channel}</Text>
+
+        <View style={s.chPill}>
+          <View style={[s.chDot, { backgroundColor: connected ? C.green : C.orange }]} />
+          <Text style={s.chName}># {channel}</Text>
         </View>
-        <View style={{ flex: 1 }}/>
-        <View style={[styles.connBadge, { borderColor: connected ? C.green : C.orange }]}>
-          <View style={[styles.connDot, { backgroundColor: connected ? C.green : C.orange }]}/>
-          <Text style={[styles.connText, { color: connected ? C.green : C.orange }]}>{connected ? ping : '…'}</Text>
+
+        <View style={{ flex: 1 }} />
+
+        <View style={[s.pingBadge, { borderColor: connected ? C.border2 : C.orange }]}>
+          <Text style={[s.pingText, { color: connected ? C.text2 : C.orange }]}>
+            {connected ? ping : 'off'}
+          </Text>
         </View>
-        <LinearGradient colors={myColors} style={styles.tbAvatar}>
-          <Text style={styles.tbAvatarText}>{myInit}</Text>
+
+        <LinearGradient colors={myColors} style={s.myAvatar}>
+          <Text style={s.myAvatarText}>{myInit}</Text>
         </LinearGradient>
       </View>
 
+      {/* ── VISUALIZER ── */}
+      <View style={s.vizWrap}>
+        <Visualizer active={talking || isPeerTalking} isPeer={isPeerTalking} />
+      </View>
 
-      {/* BODY */}
-      <View style={styles.body}>
-
-        {/* USER LIST */}
-        <View style={styles.userPanel}>
-          <Text style={styles.panelLabel}>Online · {users.length}</Text>
-          <ScrollView showsVerticalScrollIndicator={false}>
-            {users.map(u => {
-              const [c1, c2] = avatarColor(u.name);
-              const isMe     = u.id === myId.current;
-              const isTalker = u.id === talkerId;
-              return (
-                <View key={u.id} style={styles.userItem}>
-                  <LinearGradient colors={[c1, c2]} style={styles.uAvatar}>
-                    <Text style={styles.uAvatarText}>{u.name[0]?.toUpperCase()}</Text>
-                  </LinearGradient>
-                  <Text style={styles.uName} numberOfLines={1}>{u.name}{isMe ? ' ✓' : ''}</Text>
-                  <Text style={{ fontSize: 9, color: isTalker ? C.green : C.text3 }}>{isTalker ? '🎙' : '●'}</Text>
-                </View>
-              );
-            })}
-          </ScrollView>
+      {/* ── SPEAKER BANNER ── */}
+      <Animated.View
+        pointerEvents="none"
+        style={[s.bannerWrap, {
+          opacity: bannerAnim,
+          transform: [{ translateY: bannerAnim.interpolate({ inputRange: [0, 1], outputRange: [-8, 0] }) }],
+        }]}
+      >
+        <View style={s.banner}>
+          <View style={s.bannerDot} />
+          <Text style={s.bannerText}>{speakerName} está falando</Text>
         </View>
+      </Animated.View>
 
-        {/* CENTER */}
-        <View style={styles.center}>
-          <Visualizer active={talking || isPeerTalking} isPeer={isPeerTalking}/>
+      {/* ── USERS ROW ── */}
+      <View style={s.usersSection}>
+        <Text style={s.sectionLabel}>{users.length} online</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.usersRow}>
+          {users.map(u => {
+            const [c1, c2] = avatarColor(u.name);
+            const isMe     = u.id === myId.current;
+            const isTalker = u.id === talkerId;
+            return (
+              <View key={u.id} style={[s.userPill, isMe && s.userPillMe, isTalker && s.userPillTalker]}>
+                <LinearGradient colors={[c1, c2]} style={s.pillAvatar}>
+                  <Text style={s.pillAvatarText}>{u.name[0]?.toUpperCase()}</Text>
+                </LinearGradient>
+                <Text style={s.pillName} numberOfLines={1}>{isMe ? 'Você' : u.name.split(' ')[0]}</Text>
+                {isTalker && <Text style={s.pillMic}>🎙</Text>}
+              </View>
+            );
+          })}
+        </ScrollView>
+      </View>
 
-          <View style={{ alignItems: 'center', gap: 4 }}>
-            <Text style={styles.chInfoName}># {channel}</Text>
-            <Text style={styles.chInfoSub}>
-              <Text style={{ color: C.green }}>{users.length}</Text>
-              {' online · '}
-              <Text style={{ color: hasMic ? C.green : '#ff4444', fontWeight: '700' }}>
-                {hasMic ? 'Mic ativo' : 'SEM MIC'}
-              </Text>
-            </Text>
-            {channelBusy && (
-              <Text style={{ fontSize: 10, color: '#ffaa00', textAlign: 'center', marginTop: 4 }}>
-                {isPlaying ? '🔊 Reproduzindo…' : '🎙 Canal ocupado'}
-              </Text>
-            )}
-          </View>
-
-          {!hasMic && (
-            <TouchableOpacity
-              style={{ backgroundColor: '#ff444422', borderWidth: 1, borderColor: '#ff4444', borderRadius: 8, paddingHorizontal: 16, paddingVertical: 8 }}
-              onPress={() => audio.requestPermission().then(ok => setHasMic(ok))}
-            >
-              <Text style={{ color: '#ff4444', fontSize: 12, fontWeight: '700' }}>Tocar para ativar microfone</Text>
-            </TouchableOpacity>
-          )}
-
-          <PTTButton
-            talking={talking}
-            disabled={!connected || channelBusy}
-            onStart={startTalking}
-            onStop={stopTalking}
-          />
-
-          <Animated.View style={[
-            styles.banner,
-            {
-              opacity:   bannerAnim,
-              transform: [{ translateY: bannerAnim.interpolate({ inputRange: [0, 1], outputRange: [12, 0] }) }],
-            },
-          ]}>
-            <Text style={styles.bannerText}>🎙 {otherName}</Text>
-          </Animated.View>
-        </View>
-
-        {/* ACTIVITY LOG */}
-        <View style={styles.logPanel}>
-          <Text style={styles.panelLabel}>Atividade</Text>
-          <ScrollView showsVerticalScrollIndicator={false}>
-            {log.length === 0 && <Text style={styles.logEmpty}>Aguardando…</Text>}
-            {log.map(item => {
+      {/* ── ACTIVITY LOG ── */}
+      <View style={s.logSection}>
+        <Text style={s.sectionLabel}>Transmissões</Text>
+        <ScrollView style={s.logScroll} showsVerticalScrollIndicator={false}>
+          {log.length === 0 ? (
+            <Text style={s.logEmpty}>Aguardando transmissões…</Text>
+          ) : (
+            log.map(item => {
               const [c1, c2] = avatarColor(item.name);
               return (
-                <View key={item.id} style={styles.logItem}>
-                  <LinearGradient colors={[c1, c2]} style={styles.logAvatar}>
-                    <Text style={styles.logAvatarText}>{item.name[0]?.toUpperCase()}</Text>
+                <View key={item.id} style={s.logItem}>
+                  <LinearGradient colors={[c1, c2]} style={s.logAvatar}>
+                    <Text style={s.logAvatarText}>{item.name[0]?.toUpperCase()}</Text>
                   </LinearGradient>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.logName} numberOfLines={1}>{item.name}</Text>
-                    <Text style={styles.logDur}>🎙 {item.duration} · {item.ts}</Text>
+                  <View style={s.logInfo}>
+                    <Text style={s.logName}>{item.name}</Text>
+                    <Text style={s.logMeta}>🎙 {item.duration}  ·  {item.ts}</Text>
                   </View>
                   {item.audio && (
                     <TouchableOpacity
+                      style={s.replayBtn}
                       onPress={() => audio.playAudio(item.audio!).catch(() => {})}
-                      style={styles.replayBtn}
                     >
-                      <Text style={styles.replayIcon}>▶</Text>
+                      <Text style={s.replayIcon}>▶</Text>
                     </TouchableOpacity>
                   )}
                 </View>
               );
-            })}
-          </ScrollView>
-        </View>
+            })
+          )}
+        </ScrollView>
       </View>
 
-      {/* BOTTOM STATUS */}
-      <View style={[styles.bottomBar, { paddingBottom: insets.bottom + 4 }]}>
-        <LinearGradient colors={myColors} style={styles.myAvatar}>
-          <Text style={styles.myAvatarText}>{myInit}</Text>
-        </LinearGradient>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.myName}>{myName}</Text>
-          <Text style={styles.myStat}>{connected ? '● Online' : '● Offline'}</Text>
-        </View>
+      {/* ── PTT ZONE ── */}
+      <View style={[s.pttZone, { paddingBottom: insets.bottom + 16 }]}>
         {!hasMic && (
-          <View style={[styles.badge, { borderColor: C.red }]}>
-            <Text style={[styles.badgeText, { color: C.red }]}>Sem mic</Text>
-          </View>
+          <TouchableOpacity
+            style={s.micWarning}
+            onPress={() => audio.requestPermission().then(ok => setHasMic(ok))}
+          >
+            <Text style={s.micWarningText}>Toque para ativar o microfone</Text>
+          </TouchableOpacity>
         )}
+
+        <PTTButton
+          talking={talking}
+          disabled={!connected || channelBusy}
+          onStart={startTalking}
+          onStop={stopTalking}
+        />
+
+        <Text style={[s.pttLabel, { color: pttLabelColor }]}>{pttLabel}</Text>
       </View>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
+const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: C.bg },
 
+  /* Top bar */
   topbar: {
-    height: 52, flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: 14, gap: 10,
+    height: 54, flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 16, gap: 10,
     backgroundColor: C.surface, borderBottomWidth: 1, borderBottomColor: C.border,
   },
-  tbLogo:       { flexDirection: 'row', alignItems: 'center', gap: 7 },
-  tbMicBody:    { width: 8, height: 14, borderRadius: 4 },
-  tbAppName:    { fontSize: 15, fontWeight: '900', color: C.cyan, letterSpacing: -0.5 },
-  tbChPill:     {
-    flexDirection: 'row', alignItems: 'center', gap: 5,
-    paddingHorizontal: 10, paddingVertical: 4,
-    backgroundColor: C.card, borderRadius: 8, borderWidth: 1, borderColor: C.border2,
+  logoRow:      { flexDirection: 'row', alignItems: 'center', gap: 7 },
+  logoMic:      { width: 8, height: 14, borderRadius: 4, backgroundColor: C.cyan },
+  logoText:     { fontSize: 16, fontWeight: '900', color: C.cyan, letterSpacing: -0.5 },
+  chPill:       {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: C.card, paddingHorizontal: 10, paddingVertical: 5,
+    borderRadius: 99, borderWidth: 1, borderColor: C.border2,
   },
-  tbDot:        { width: 5, height: 5, borderRadius: 3, backgroundColor: C.green },
-  tbChName:     { fontSize: 12, color: C.text2 },
-  connBadge:    {
-    flexDirection: 'row', alignItems: 'center', gap: 5,
-    paddingHorizontal: 8, paddingVertical: 3, borderRadius: 99, borderWidth: 1,
-  },
-  connDot:      { width: 5, height: 5, borderRadius: 3 },
-  connText:     { fontSize: 11, fontWeight: '600' },
-  tbAvatar:     { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
-  tbAvatarText: { fontSize: 12, fontWeight: '700', color: '#fff' },
+  chDot:        { width: 6, height: 6, borderRadius: 3 },
+  chName:       { fontSize: 13, color: C.text2, fontWeight: '600' },
+  pingBadge:    { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 99, borderWidth: 1 },
+  pingText:     { fontSize: 11, fontWeight: '600' },
+  myAvatar:     { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
+  myAvatarText: { fontSize: 12, fontWeight: '800', color: '#fff' },
 
-  channelBar:        { maxHeight: 48, backgroundColor: C.surface, borderBottomWidth: 1, borderBottomColor: C.border },
-  channelBarContent: { paddingHorizontal: 10, paddingVertical: 8, gap: 6, flexDirection: 'row' },
-  chTab:         {
-    flexDirection: 'row', alignItems: 'center', gap: 5,
-    paddingHorizontal: 12, paddingVertical: 5,
-    borderRadius: 20, backgroundColor: C.card, borderWidth: 1, borderColor: C.border,
+  /* Visualizer */
+  vizWrap: {
+    height: 60, justifyContent: 'center', alignItems: 'center',
+    backgroundColor: C.surface, borderBottomWidth: 1, borderBottomColor: C.border,
   },
-  chTabActive:     { backgroundColor: '#00d4ff18', borderColor: C.cyan },
-  chTabIcon:       { fontSize: 13 },
-  chTabText:       { fontSize: 12, color: C.text2 },
-  chTabTextActive: { color: C.cyan, fontWeight: '700' },
 
-  body: { flex: 1, flexDirection: 'row' },
-
-  userPanel: {
-    width: 90, backgroundColor: C.surface,
-    borderRightWidth: 1, borderRightColor: C.border, padding: 8,
-  },
-  panelLabel: {
-    fontSize: 9, fontWeight: '700', letterSpacing: 1.2,
-    color: C.text3, textTransform: 'uppercase', marginBottom: 8,
-  },
-  userItem:    { flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 6 },
-  uAvatar:     { width: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
-  uAvatarText: { fontSize: 9, fontWeight: '700', color: '#fff' },
-  uName:       { flex: 1, fontSize: 10, color: C.text2 },
-
-  center:     { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 16, gap: 16 },
-  chInfoName: { fontSize: 18, fontWeight: '800', color: C.text },
-  chInfoSub:  { fontSize: 12, color: C.text2 },
+  /* Speaker banner */
+  bannerWrap: { position: 'absolute', top: 54 + 60, left: 0, right: 0, zIndex: 10, alignItems: 'center', paddingTop: 8 },
   banner: {
-    backgroundColor: '#00ff8820', borderRadius: 12,
-    borderWidth: 1, borderColor: C.green,
-    paddingHorizontal: 16, paddingVertical: 8,
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: '#00ff8818', borderWidth: 1, borderColor: C.green,
+    paddingHorizontal: 16, paddingVertical: 8, borderRadius: 99,
   },
-  bannerText: { fontSize: 13, color: C.green, fontWeight: '600' },
+  bannerDot:  { width: 8, height: 8, borderRadius: 4, backgroundColor: C.green },
+  bannerText: { fontSize: 13, color: C.green, fontWeight: '700' },
 
-  logPanel: {
-    width: 100, backgroundColor: C.surface,
-    borderLeftWidth: 1, borderLeftColor: C.border, padding: 8,
+  /* Users row */
+  usersSection: {
+    paddingTop: 12, paddingBottom: 8,
+    borderBottomWidth: 1, borderBottomColor: C.border,
   },
-  logEmpty:      { fontSize: 10, color: C.text3, textAlign: 'center', marginTop: 12, lineHeight: 16 },
-  logItem:       { flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 8 },
-  logAvatar:     { width: 20, height: 20, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-  logAvatarText: { fontSize: 9, fontWeight: '700', color: '#fff' },
-  logName:       { fontSize: 10, color: C.text, fontWeight: '600' },
-  logDur:        { fontSize: 9,  color: C.text3 },
-  replayBtn:     { width: 24, height: 24, borderRadius: 12, backgroundColor: C.cyanDim, alignItems: 'center', justifyContent: 'center' },
-  replayIcon:    { fontSize: 9, color: C.cyan },
+  sectionLabel: {
+    fontSize: 10, fontWeight: '700', color: C.text3,
+    letterSpacing: 1.2, textTransform: 'uppercase',
+    paddingHorizontal: 16, marginBottom: 8,
+  },
+  usersRow: { paddingHorizontal: 12, gap: 8 },
+  userPill: {
+    flexDirection: 'row', alignItems: 'center', gap: 7,
+    backgroundColor: C.card, borderWidth: 1, borderColor: C.border2,
+    paddingHorizontal: 10, paddingVertical: 7, borderRadius: 99,
+  },
+  userPillMe:     { borderColor: C.cyan + '55' },
+  userPillTalker: { borderColor: C.green, backgroundColor: '#00ff8812' },
+  pillAvatar:     { width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  pillAvatarText: { fontSize: 10, fontWeight: '800', color: '#fff' },
+  pillName:       { fontSize: 13, color: C.text2, fontWeight: '600', maxWidth: 70 },
+  pillMic:        { fontSize: 11 },
 
-  bottomBar: {
+  /* Activity log */
+  logSection: { flex: 1, paddingTop: 12 },
+  logScroll:  { flex: 1, paddingHorizontal: 16 },
+  logEmpty:   { fontSize: 13, color: C.text3, textAlign: 'center', marginTop: 24, lineHeight: 20 },
+  logItem: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
-    paddingHorizontal: 14, paddingTop: 10,
-    backgroundColor: C.surface, borderTopWidth: 1, borderTopColor: C.border,
+    paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: C.border,
   },
-  myAvatar:     { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
-  myAvatarText: { fontSize: 13, fontWeight: '700', color: '#fff' },
-  myName:       { fontSize: 13, fontWeight: '600', color: C.text },
-  myStat:       { fontSize: 11, color: C.text3 },
-  badge:        { borderRadius: 99, paddingHorizontal: 8, paddingVertical: 4, borderWidth: 1 },
-  badgeText:    { fontSize: 10, fontWeight: '600' },
+  logAvatar:     { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  logAvatarText: { fontSize: 12, fontWeight: '800', color: '#fff' },
+  logInfo:       { flex: 1 },
+  logName:       { fontSize: 14, fontWeight: '700', color: C.text },
+  logMeta:       { fontSize: 12, color: C.text3, marginTop: 2 },
+  replayBtn: {
+    width: 32, height: 32, borderRadius: 16,
+    backgroundColor: C.cyanDim, alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1, borderColor: C.cyan + '44',
+  },
+  replayIcon: { fontSize: 10, color: C.cyan },
+
+  /* PTT zone */
+  pttZone: {
+    alignItems: 'center', justifyContent: 'flex-end',
+    borderTopWidth: 1, borderTopColor: C.border,
+    backgroundColor: C.surface,
+  },
+  micWarning: {
+    marginTop: 12,
+    backgroundColor: C.red + '18', borderWidth: 1, borderColor: C.red + '66',
+    paddingHorizontal: 16, paddingVertical: 8, borderRadius: 99,
+  },
+  micWarningText: { fontSize: 12, color: C.red, fontWeight: '600' },
+  pttLabel: {
+    fontSize: 13, fontWeight: '600', letterSpacing: 0.3,
+    marginTop: -20, marginBottom: 8,
+  },
 });
