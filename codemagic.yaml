@@ -35,10 +35,38 @@ workflows:
           keychain add-certificates --certificate /tmp/cert.p12 --certificate-password "$CM_CERTIFICATE_PASSWORD"
       - name: Build IPA
         script: |
-          xcode-project build-ipa \
-            --workspace "$XCODE_WORKSPACE" \
-            --scheme "$XCODE_SCHEME" \
-            --xcargs "CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY='Apple Distribution' PROVISIONING_PROFILE_SPECIFIER=wavetalk-appstore DEVELOPMENT_TEAM=66U94U6Q5H"
+          mkdir -p build/ios/ipa
+          cat > /tmp/ExportOptions.plist << 'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>app-store</string>
+            <key>teamID</key>
+            <string>66U94U6Q5H</string>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>com.wavetalk.app</key>
+              <string>wavetalk-appstore</string>
+            </dict>
+          </dict>
+          </plist>
+          EOF
+          xcodebuild \
+            -workspace "$XCODE_WORKSPACE" \
+            -scheme "$XCODE_SCHEME" \
+            -configuration Release \
+            -archivePath build/ios/ipa/WaveTalk.xcarchive \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="Apple Distribution" \
+            PROVISIONING_PROFILE_SPECIFIER=wavetalk-appstore \
+            DEVELOPMENT_TEAM=66U94U6Q5H \
+            archive
+          xcodebuild -exportArchive \
+            -archivePath build/ios/ipa/WaveTalk.xcarchive \
+            -exportPath build/ios/ipa/ \
+            -exportOptionsPlist /tmp/ExportOptions.plist
     artifacts:
       - build/ios/ipa/*.ipa
     publishing:
