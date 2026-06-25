@@ -5,6 +5,6 @@
 //       2. Point to the wavetalk server repo
 //       3. Copy the generated URL and paste it below
 const DEV_SERVER  = 'http://192.168.0.35:3001';
-const PROD_SERVER = 'https://wavetalk-server.up.railway.app'; // ← update after deploy
+const PROD_SERVER = 'https://wavetalk-mobile-production.up.railway.app';
 
 export const SERVER_URL = __DEV__ ? DEV_SERVER : PROD_SERVER;
