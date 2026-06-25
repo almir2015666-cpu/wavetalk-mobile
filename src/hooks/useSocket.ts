@@ -1,7 +1,8 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
+import { SERVER_URL } from '../config';
 
-export const SERVER_URL = 'http://192.168.0.35:3001';
+export { SERVER_URL };
 
 export type User = { id: string; name: string; channel: string; talking: boolean };
 

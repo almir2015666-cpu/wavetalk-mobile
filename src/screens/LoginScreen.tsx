@@ -99,7 +99,7 @@ export default function LoginScreen({ onEnter, loading }: Props) {
               >
                 {loading
                   ? <ActivityIndicator color="#fff" />
-                  : <Text style={s.btnText}>Entrar no canal  →</Text>
+                  : <Text style={s.btnText}>Escolher canal  →</Text>
                 }
               </LinearGradient>
             ) : (
