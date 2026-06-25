@@ -17,7 +17,8 @@
       "bundleIdentifier": "com.wavetalk.app",
       "infoPlist": {
         "NSMicrophoneUsageDescription": "WaveTalk precisa do microfone para transmissão de voz em push-to-talk.",
-        "UIBackgroundModes": ["audio", "fetch", "remote-notification"]
+        "UIBackgroundModes": ["audio", "fetch", "remote-notification"],
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
