@@ -4,124 +4,63 @@ import { C } from '../theme';
 
 const { width: W, height: H } = Dimensions.get('window');
 
-interface Blob {
-  color:  string;
-  size:   number;
-  points: Array<{ x: number; y: number }>;
-  dur:    number;
-  delay:  number;
+interface BlobProps {
+  color:   string;
+  size:    number;
+  fromX:   number;
+  fromY:   number;
+  toX:     number;
+  toY:     number;
+  dur:     number;
+  delay:   number;
   opacity: number;
 }
 
-const BLOBS: Blob[] = [
-  {
-    color:   C.cyan,
-    size:    260,
-    points:  [{ x: -60, y: 40 }, { x: W * 0.3, y: 120 }, { x: W * 0.6, y: 20 }, { x: W - 40, y: 200 }, { x: W * 0.4, y: 300 }],
-    dur:     14000,
-    delay:   0,
-    opacity: 0.18,
-  },
-  {
-    color:   C.purple,
-    size:    220,
-    points:  [{ x: W - 40, y: 100 }, { x: W * 0.5, y: 60 }, { x: 20, y: 180 }, { x: W * 0.3, y: 320 }, { x: W * 0.7, y: 250 }],
-    dur:     18000,
-    delay:   3000,
-    opacity: 0.15,
-  },
-  {
-    color:   C.green,
-    size:    180,
-    points:  [{ x: W * 0.2, y: H * 0.5 }, { x: W * 0.7, y: H * 0.4 }, { x: W * 0.1, y: H * 0.6 }, { x: W * 0.8, y: H * 0.55 }],
-    dur:     22000,
-    delay:   6000,
-    opacity: 0.12,
-  },
-  {
-    color:   C.cyan,
-    size:    200,
-    points:  [{ x: W * 0.6, y: H * 0.6 }, { x: W * 0.1, y: H * 0.7 }, { x: W * 0.8, y: H * 0.8 }, { x: W * 0.3, y: H * 0.65 }],
-    dur:     16000,
-    delay:   9000,
-    opacity: 0.14,
-  },
-  {
-    color:   C.purple,
-    size:    160,
-    points:  [{ x: W * 0.4, y: H * 0.8 }, { x: W * 0.9, y: H * 0.7 }, { x: W * 0.2, y: H * 0.85 }, { x: W * 0.6, y: H * 0.9 }],
-    dur:     20000,
-    delay:   2000,
-    opacity: 0.13,
-  },
-  {
-    color:   C.orange,
-    size:    140,
-    points:  [{ x: -20, y: H * 0.4 }, { x: W * 0.5, y: H * 0.35 }, { x: W + 20, y: H * 0.5 }, { x: W * 0.3, y: H * 0.45 }],
-    dur:     25000,
-    delay:   12000,
-    opacity: 0.10,
-  },
-];
-
-function BlobAnim({ blob }: { blob: Blob }) {
-  const x    = useRef(new Animated.Value(blob.points[0].x)).current;
-  const y    = useRef(new Animated.Value(blob.points[0].y)).current;
-  const sc   = useRef(new Animated.Value(1)).current;
+function Blob({ color, size, fromX, fromY, toX, toY, dur, delay, opacity }: BlobProps) {
+  const x  = useRef(new Animated.Value(fromX - size / 2)).current;
+  const y  = useRef(new Animated.Value(fromY - size / 2)).current;
+  const sc = useRef(new Animated.Value(0.9)).current;
 
   useEffect(() => {
-    const segDur = blob.dur / blob.points.length;
-
-    const buildLoop = () => {
-      const steps = [...blob.points, blob.points[0]];
-      const xAnims = steps.map((p, i) =>
-        Animated.timing(x, { toValue: p.x, duration: segDur, easing: Easing.inOut(Easing.sin), useNativeDriver: true, delay: i === 0 ? blob.delay : 0 })
-      );
-      const yAnims = steps.map((p, i) =>
-        Animated.timing(y, { toValue: p.y, duration: segDur, easing: Easing.inOut(Easing.sin), useNativeDriver: true, delay: i === 0 ? blob.delay : 0 })
-      );
-      return Animated.loop(
-        Animated.parallel([
-          Animated.sequence(xAnims),
-          Animated.sequence(yAnims),
-        ])
-      );
-    };
-
-    const scaleLoop = Animated.loop(
+    const move = Animated.loop(
       Animated.sequence([
-        Animated.timing(sc, { toValue: 1.18, duration: blob.dur * 0.4, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
-        Animated.timing(sc, { toValue: 0.88, duration: blob.dur * 0.4, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
-        Animated.timing(sc, { toValue: 1.0,  duration: blob.dur * 0.2, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+        Animated.delay(delay),
+        Animated.parallel([
+          Animated.timing(x, { toValue: toX - size / 2, duration: dur, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+          Animated.timing(y, { toValue: toY - size / 2, duration: dur, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+        ]),
+        Animated.parallel([
+          Animated.timing(x, { toValue: fromX - size / 2, duration: dur, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+          Animated.timing(y, { toValue: fromY - size / 2, duration: dur, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+        ]),
       ])
     );
 
-    const loop = buildLoop();
-    loop.start();
-    scaleLoop.start();
-    return () => { loop.stop(); scaleLoop.stop(); };
-  }, []);
+    const breathe = Animated.loop(
+      Animated.sequence([
+        Animated.timing(sc, { toValue: 1.25, duration: dur * 0.45, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+        Animated.timing(sc, { toValue: 0.80, duration: dur * 0.45, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+        Animated.timing(sc, { toValue: 0.90, duration: dur * 0.10, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+      ])
+    );
 
-  const half = blob.size / 2;
+    move.start();
+    breathe.start();
+    return () => { move.stop(); breathe.stop(); };
+  }, []);
 
   return (
     <Animated.View
       pointerEvents="none"
-      style={[
-        s.blob,
-        {
-          width:         blob.size,
-          height:        blob.size,
-          borderRadius:  blob.size / 2,
-          backgroundColor: blob.color,
-          opacity:       blob.opacity,
-          transform: [
-            { translateX: Animated.add(x, new Animated.Value(-half)) },
-            { translateY: Animated.add(y, new Animated.Value(-half)) },
-            { scale: sc },
-          ],
-        },
-      ]}
+      style={{
+        position:        'absolute',
+        width:           size,
+        height:          size,
+        borderRadius:    size / 2,
+        backgroundColor: color,
+        opacity,
+        transform: [{ translateX: x }, { translateY: y }, { scale: sc }],
+      }}
     />
   );
 }
@@ -129,11 +68,12 @@ function BlobAnim({ blob }: { blob: Blob }) {
 export default function LiveBackground() {
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="none">
-      {BLOBS.map((blob, i) => <BlobAnim key={i} blob={blob} />)}
+      <Blob color={C.cyan}   size={320} fromX={-40}   fromY={80}     toX={W * 0.6}  toY={180}     dur={9000}  delay={0}    opacity={0.30} />
+      <Blob color={C.purple} size={280} fromX={W + 40} fromY={60}    toX={W * 0.2}  toY={220}     dur={11000} delay={1500} opacity={0.25} />
+      <Blob color={C.cyan}   size={240} fromX={W * 0.1} fromY={H * 0.4} toX={W * 0.7} toY={H * 0.5} dur={13000} delay={500}  opacity={0.22} />
+      <Blob color={C.purple} size={260} fromX={W * 0.8} fromY={H * 0.55} toX={W * 0.1} toY={H * 0.6} dur={10000} delay={3000} opacity={0.20} />
+      <Blob color={C.cyan}   size={200} fromX={W * 0.3} fromY={H * 0.75} toX={W * 0.8} toY={H * 0.8} dur={12000} delay={2000} opacity={0.18} />
+      <Blob color={C.purple} size={180} fromX={W * 0.6} fromY={H * 0.85} toX={-20}    toY={H * 0.9} dur={14000} delay={4000} opacity={0.16} />
     </View>
   );
 }
-
-const s = StyleSheet.create({
-  blob: { position: 'absolute' },
-});

@@ -41,7 +41,8 @@ const DEFAULTS: Channel[] = [
 ];
 
 export default function ChannelPickerScreen({ myName, onJoin, onBack }: Props) {
-  const insets = useSafeAreaInsets();
+  const insets    = useSafeAreaInsets();
+  const scrollRef = useRef<ScrollView>(null);
   const [channels,    setChannels]    = useState<Channel[]>(DEFAULTS);
   const [loading,     setLoading]     = useState(true);
   const [refreshing,  setRefreshing]  = useState(false);
@@ -133,8 +134,10 @@ export default function ChannelPickerScreen({ myName, onJoin, onBack }: Props) {
       </View>
 
       <Animated.ScrollView
+        ref={scrollRef as any}
         style={{ opacity: fadeAnim }}
-        contentContainerStyle={[s.scroll, { paddingBottom: insets.bottom + 24 }]}
+        contentContainerStyle={[s.scroll, { paddingBottom: insets.bottom + 40 }]}
+        keyboardShouldPersistTaps="handled"
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -217,6 +220,7 @@ export default function ChannelPickerScreen({ myName, onJoin, onBack }: Props) {
             autoCapitalize="none"
             returnKeyType="next"
             selectionColor={C.cyan}
+            onFocus={() => setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 120)}
           />
           <TextInput
             style={[s.createInput, { marginTop: -4 }]}
@@ -229,6 +233,7 @@ export default function ChannelPickerScreen({ myName, onJoin, onBack }: Props) {
             returnKeyType="go"
             onSubmitEditing={() => canCreate && handleJoin({ name: newChannel.trim(), online: 0, talking: false })}
             selectionColor={C.cyan}
+            onFocus={() => setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 120)}
           />
 
           <TouchableOpacity
