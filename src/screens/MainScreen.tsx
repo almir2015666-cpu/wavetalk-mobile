@@ -2,6 +2,7 @@ import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
   Animated, Modal, ActivityIndicator, Share, TextInput,
+  KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
@@ -81,6 +82,10 @@ export default function MainScreen({ myName, myChannel: initChannel, myPin, myCh
   // Session stats modal
   const [statsOpen,     setStatsOpen]    = useState(false);
   const [pendingExit,   setPendingExit]  = useState<'logout' | 'switch' | null>(null);
+
+  // Log expanded modal
+  const [logExpanded,   setLogExpanded]  = useState(false);
+  const [playingId,     setPlayingId]    = useState<string | null>(null);
 
   // PIN prompt when join:rejected reason=pin
   const [pinModal,      setPinModal]     = useState(false);
@@ -453,7 +458,14 @@ export default function MainScreen({ myName, myChannel: initChannel, myPin, myCh
 
       {/* ── ACTIVITY LOG ── */}
       <View style={s.logSection}>
-        <Text style={s.sectionLabel}>Transmissões</Text>
+        <View style={s.logHeader}>
+          <Text style={s.sectionLabel}>Transmissões {log.length > 0 ? `(${log.length})` : ''}</Text>
+          {log.length > 0 && (
+            <TouchableOpacity onPress={() => setLogExpanded(true)} style={s.logExpandBtn} activeOpacity={0.7}>
+              <Text style={s.logExpandText}>Ver tudo ↗</Text>
+            </TouchableOpacity>
+          )}
+        </View>
         <ScrollView style={s.logScroll} showsVerticalScrollIndicator={false}>
           {log.length === 0 ? (
             <Text style={s.logEmpty}>Aguardando transmissões…</Text>
@@ -591,9 +603,76 @@ export default function MainScreen({ myName, myChannel: initChannel, myPin, myCh
         </TouchableOpacity>
       </Modal>
 
+      {/* ── LOG EXPANDED MODAL ── */}
+      <Modal visible={logExpanded} transparent animationType="slide" onRequestClose={() => setLogExpanded(false)}>
+        <View style={s.logModalOverlay}>
+          <View style={[s.logModalSheet, { paddingBottom: insets.bottom + 16 }]}>
+            <View style={s.logModalHeader}>
+              <View style={s.modalHandle} />
+              <View style={s.logModalTitleRow}>
+                <Text style={s.modalTitle}>Transmissões</Text>
+                <TouchableOpacity onPress={() => setLogExpanded(false)} style={s.logModalClose}>
+                  <Text style={s.logModalCloseText}>✕</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.logModalScroll}>
+              {log.length === 0 ? (
+                <Text style={s.logEmpty}>Nenhuma transmissão ainda</Text>
+              ) : (
+                log.map(item => {
+                  const [c1, c2] = avatarColor(item.name);
+                  const isActive = playingId === item.id;
+                  return (
+                    <View key={item.id} style={s.logModalItem}>
+                      <LinearGradient colors={[c1, c2]} style={s.logModalAvatar}>
+                        <Text style={s.logModalAvatarText}>{item.name[0]?.toUpperCase()}</Text>
+                      </LinearGradient>
+                      <View style={s.logModalInfo}>
+                        <Text style={s.logModalName}>{item.name}</Text>
+                        <Text style={s.logModalMeta}>🎙 {item.duration}  ·  {item.ts}</Text>
+                      </View>
+                      {item.audio ? (
+                        <TouchableOpacity
+                          style={[s.replayBtnLarge, isActive && s.replayBtnLargeActive]}
+                          activeOpacity={0.75}
+                          onPress={async () => {
+                            setPlayingId(item.id);
+                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                            await audio.playAudio(item.audio!).catch(() => {});
+                            setPlayingId(null);
+                          }}
+                        >
+                          <Text style={[s.replayBtnLargeIcon, isActive && { color: C.bg }]}>
+                            {isActive ? '■' : '▶'}
+                          </Text>
+                          <Text style={[s.replayBtnLargeLabel, isActive && { color: C.bg }]}>
+                            {isActive ? 'tocando' : 'ouvir'}
+                          </Text>
+                        </TouchableOpacity>
+                      ) : (
+                        <View style={s.replayBtnNoAudio}>
+                          <Text style={s.replayBtnNoAudioText}>sem áudio</Text>
+                        </View>
+                      )}
+                    </View>
+                  );
+                })
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
       {/* ── PIN PROMPT MODAL ── */}
       <Modal visible={pinModal} transparent animationType="fade" onRequestClose={() => setPinModal(false)}>
-        <View style={s.statsOverlay}>
+        <KeyboardAvoidingView
+          style={s.statsOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+        >
+          <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => setPinModal(false)} />
           <View style={s.statsSheet}>
             <Text style={s.statsTitle}>Canal protegido 🔒</Text>
             <Text style={s.statsSub}>Digite o PIN para entrar em #{pinChannel}</Text>
@@ -626,7 +705,8 @@ export default function MainScreen({ myName, myChannel: initChannel, myPin, myCh
               </TouchableOpacity>
             </View>
           </View>
-        </View>
+          <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => setPinModal(false)} />
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* ── SESSION STATS MODAL ── */}
@@ -840,4 +920,40 @@ const s = StyleSheet.create({
     letterSpacing: 6, marginVertical: 8,
   },
   pinErrorText: { fontSize: 12, color: C.red, fontWeight: '600', textAlign: 'center', marginTop: -4 },
+
+  // Log section extras
+  logHeader:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, marginBottom: 8 },
+  logExpandBtn:  { paddingVertical: 2, paddingHorizontal: 4 },
+  logExpandText: { fontSize: 11, fontWeight: '700', color: C.cyan, letterSpacing: 0.3 },
+
+  // Log expanded modal
+  logModalOverlay:    { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
+  logModalSheet:      {
+    backgroundColor: C.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    maxHeight: '85%', borderTopWidth: 1, borderTopColor: C.border2,
+  },
+  logModalHeader:    { paddingTop: 12, paddingHorizontal: 20 },
+  logModalTitleRow:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
+  logModalClose:     { width: 32, height: 32, borderRadius: 16, backgroundColor: C.card, alignItems: 'center', justifyContent: 'center' },
+  logModalCloseText: { fontSize: 14, color: C.text2, fontWeight: '700' },
+  logModalScroll:    { paddingHorizontal: 20, paddingBottom: 8 },
+  logModalItem:      {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: C.border,
+  },
+  logModalAvatar:     { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
+  logModalAvatarText: { fontSize: 16, fontWeight: '800', color: '#fff' },
+  logModalInfo:       { flex: 1 },
+  logModalName:       { fontSize: 15, fontWeight: '800', color: C.text },
+  logModalMeta:       { fontSize: 13, color: C.text3, marginTop: 3 },
+  replayBtnLarge: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: C.cyanDim, borderWidth: 1.5, borderColor: C.cyan + '66',
+    borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, minWidth: 80,
+  },
+  replayBtnLargeActive: { backgroundColor: C.cyan, borderColor: C.cyan },
+  replayBtnLargeIcon:   { fontSize: 14, color: C.cyan, fontWeight: '800' },
+  replayBtnLargeLabel:  { fontSize: 12, color: C.cyan, fontWeight: '700' },
+  replayBtnNoAudio:     { paddingHorizontal: 10, paddingVertical: 10 },
+  replayBtnNoAudioText: { fontSize: 11, color: C.text3 },
 });
