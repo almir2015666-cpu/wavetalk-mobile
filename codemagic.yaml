@@ -37,9 +37,11 @@ workflows:
         script: |
           mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
           echo "$CM_PROVISIONING_PROFILE" | base64 --decode > /tmp/wavetalk.mobileprovision
-          UUID=$(security cms -D -i /tmp/wavetalk.mobileprovision | plutil -extract UUID raw -)
+          security cms -D -i /tmp/wavetalk.mobileprovision -o /tmp/profile.plist
+          UUID=$(/usr/libexec/PlistBuddy -c 'Print :UUID' /tmp/profile.plist)
+          echo "Profile UUID: $UUID"
           cp /tmp/wavetalk.mobileprovision "$HOME/Library/MobileDevice/Provisioning Profiles/${UUID}.mobileprovision"
-          echo "Installed profile UUID: $UUID"
+          echo "PROFILE_UUID=$UUID" >> $CM_ENV
       - name: Build IPA
         script: |
           mkdir -p build/ios/ipa
@@ -68,6 +70,7 @@ workflows:
             CODE_SIGN_STYLE=Manual \
             CODE_SIGN_IDENTITY="Apple Distribution" \
             PROVISIONING_PROFILE_SPECIFIER=wavetalk-appstore \
+            PROVISIONING_PROFILE="$PROFILE_UUID" \
             DEVELOPMENT_TEAM=66U94U6Q5H \
             archive
           xcodebuild -exportArchive \
