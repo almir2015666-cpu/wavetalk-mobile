@@ -16,6 +16,7 @@ import { useBackground }   from '../hooks/useBackground';
 import { usePTTSounds }    from '../hooks/usePTTSounds';
 import PTTButton           from '../components/PTTButton';
 import Visualizer          from '../components/Visualizer';
+import LiveBackground      from '../components/LiveBackground';
 import { C, avatarColor }  from '../theme';
 import { SERVER_URL }      from '../config';
 
@@ -367,6 +368,9 @@ export default function MainScreen({ myName, myChannel: initChannel, myPin, myCh
   return (
     <View style={[s.root, { paddingTop: insets.top }]}>
       <StatusBar style="light" />
+
+      {/* ── LIVE BACKGROUND ── */}
+      <LiveBackground />
 
       {/* ── TOP BAR ── */}
       <View style={s.topbar}>
@@ -787,7 +791,7 @@ const s = StyleSheet.create({
 
   vizWrap: {
     height: 60, justifyContent: 'center', alignItems: 'center',
-    backgroundColor: C.surface, borderBottomWidth: 1, borderBottomColor: C.border,
+    backgroundColor: C.surface + 'cc', borderBottomWidth: 1, borderBottomColor: C.border,
   },
 
   bannerWrap: { position: 'absolute', top: 58 + 60, left: 0, right: 0, zIndex: 10, alignItems: 'center', paddingTop: 8 },
@@ -817,12 +821,13 @@ const s = StyleSheet.create({
   pillName:       { fontSize: 13, color: C.text2, fontWeight: '600', maxWidth: 70 },
   pillMic:        { fontSize: 11 },
 
-  logSection: { flex: 1, paddingTop: 12 },
+  logSection: { flex: 1, paddingTop: 12, backgroundColor: 'transparent' },
   logScroll:  { flex: 1, paddingHorizontal: 16 },
   logEmpty:   { fontSize: 13, color: C.text3, textAlign: 'center', marginTop: 24, lineHeight: 20 },
   logItem:    {
     flexDirection: 'row', alignItems: 'center', gap: 10,
     paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: C.border,
+    backgroundColor: C.bg + 'bb', borderRadius: 8, paddingHorizontal: 8, marginBottom: 2,
   },
   logAvatar:     { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
   logAvatarText: { fontSize: 12, fontWeight: '800', color: '#fff' },

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, ScrollView,
   StyleSheet, ActivityIndicator, RefreshControl, Animated, Modal,
+  KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
@@ -104,7 +105,11 @@ export default function ChannelPickerScreen({ myName, onJoin, onBack }: Props) {
   const canCreate = newChannel.trim().length >= 2;
 
   return (
-    <View style={[s.root, { paddingTop: insets.top }]}>
+    <KeyboardAvoidingView
+      style={[s.root, { paddingTop: insets.top }]}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={0}
+    >
       <StatusBar style="light" />
 
       {/* Background glows */}
@@ -265,7 +270,11 @@ export default function ChannelPickerScreen({ myName, onJoin, onBack }: Props) {
         animationType="fade"
         onRequestClose={() => setPinPrompt(null)}
       >
-        <TouchableOpacity style={s.pinOverlay} activeOpacity={1} onPress={() => setPinPrompt(null)}>
+        <KeyboardAvoidingView
+          style={s.pinOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
+          <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => setPinPrompt(null)} />
           <View style={s.pinSheet} onStartShouldSetResponder={() => true}>
             <Text style={s.pinTitle}>Canal protegido</Text>
             <Text style={s.pinSub}>Digite o PIN para entrar em #{pinPrompt?.name}</Text>
@@ -291,9 +300,10 @@ export default function ChannelPickerScreen({ myName, onJoin, onBack }: Props) {
               </LinearGradient>
             </TouchableOpacity>
           </View>
-        </TouchableOpacity>
+          <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => setPinPrompt(null)} />
+        </KeyboardAvoidingView>
       </Modal>
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -370,10 +380,10 @@ const s = StyleSheet.create({
   createBtnText:  { fontSize: 15, fontWeight: '800', color: '#fff' },
   createHint: { fontSize: 11, color: C.text3, textAlign: 'center', lineHeight: 16 },
 
-  pinOverlay:  { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', paddingHorizontal: 24 },
+  pinOverlay:  { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'space-between' },
   pinSheet:    {
-    backgroundColor: C.surface, borderRadius: 20,
-    padding: 24, gap: 14, borderWidth: 1, borderColor: C.border2,
+    backgroundColor: C.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    padding: 24, gap: 14, borderTopWidth: 1, borderColor: C.border2,
   },
   pinTitle:    { fontSize: 18, fontWeight: '900', color: C.text },
   pinSub:      { fontSize: 13, color: C.text2, lineHeight: 18 },
