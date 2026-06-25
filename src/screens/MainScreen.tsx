@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  Animated, Modal, ActivityIndicator, Share,
+  Animated, Modal, ActivityIndicator, Share, TextInput,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
@@ -81,6 +81,12 @@ export default function MainScreen({ myName, myChannel: initChannel, myPin, myCh
   // Session stats modal
   const [statsOpen,     setStatsOpen]    = useState(false);
   const [pendingExit,   setPendingExit]  = useState<'logout' | 'switch' | null>(null);
+
+  // PIN prompt when join:rejected reason=pin
+  const [pinModal,      setPinModal]     = useState(false);
+  const [pinChannel,    setPinChannel]   = useState('');
+  const [pinInput,      setPinInput]     = useState('');
+  const [pinError,      setPinError]     = useState(false);
 
   const bannerAnim = useRef(new Animated.Value(0)).current;
   const myId       = useRef('');
@@ -188,10 +194,16 @@ export default function MainScreen({ myName, myChannel: initChannel, myPin, myCh
       }
     },
     onPing:        (ms) => setPing(ms + 'ms'),
-    onJoinRejected: (reason) => {
+    onJoinRejected: (reason, ch) => {
       if (reason === 'full') {
         setFullBanner(true);
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
+      } else if (reason === 'pin') {
+        setPinChannel(ch);
+        setPinInput('');
+        setPinError(false);
+        setPinModal(true);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
       }
     },
   });
@@ -219,11 +231,16 @@ export default function MainScreen({ myName, myChannel: initChannel, myPin, myCh
     setTalking(true);
     talkStart.current = Date.now();
     sessionTxCount.current += 1;
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    // Strong double-pulse haptic on PTT press
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     pttSounds.playStart();
     pttStart();
     startTalkTimer();
-    if (hasMic && !muted) await audio.startRecording();
+    // Wait for chirp to finish (~130ms) before opening mic, so sound isn't captured
+    if (hasMic && !muted) {
+      await new Promise(r => setTimeout(r, 160));
+      await audio.startRecording();
+    }
   }, [talking, connected, hasMic, muted]);
 
   const stopTalking = useCallback(async () => {
@@ -233,7 +250,7 @@ export default function MainScreen({ myName, myChannel: initChannel, myPin, myCh
     clearTalkTimer();
     const dur = Date.now() - talkStart.current;
     sessionTalkMs.current += dur;
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
     pttSounds.playStop();
     pttStop();
     if (hasMic && !muted) {
@@ -574,6 +591,44 @@ export default function MainScreen({ myName, myChannel: initChannel, myPin, myCh
         </TouchableOpacity>
       </Modal>
 
+      {/* ── PIN PROMPT MODAL ── */}
+      <Modal visible={pinModal} transparent animationType="fade" onRequestClose={() => setPinModal(false)}>
+        <View style={s.statsOverlay}>
+          <View style={s.statsSheet}>
+            <Text style={s.statsTitle}>Canal protegido 🔒</Text>
+            <Text style={s.statsSub}>Digite o PIN para entrar em #{pinChannel}</Text>
+            <TextInput
+              style={[s.pinInput, pinError && { borderColor: C.red }]}
+              placeholder="PIN do canal"
+              placeholderTextColor={C.text3}
+              value={pinInput}
+              onChangeText={t => { setPinInput(t.replace(/\D/g, '').slice(0, 6)); setPinError(false); }}
+              keyboardType="number-pad"
+              maxLength={6}
+              autoFocus
+              selectionColor={C.cyan}
+            />
+            {pinError && <Text style={s.pinErrorText}>PIN incorreto</Text>}
+            <View style={s.statsActions}>
+              <TouchableOpacity style={s.statsStay} onPress={() => setPinModal(false)} activeOpacity={0.8}>
+                <Text style={s.statsStayText}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[s.statsLeave, { backgroundColor: C.cyan + '22', borderColor: C.cyan + '55' }]}
+                onPress={() => {
+                  if (pinInput.length < 1) { setPinError(true); return; }
+                  setPinModal(false);
+                  join(myName, pinChannel, pinInput);
+                }}
+                activeOpacity={0.8}
+              >
+                <Text style={[s.statsLeaveText, { color: C.cyan }]}>Entrar</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       {/* ── SESSION STATS MODAL ── */}
       <Modal visible={statsOpen} transparent animationType="fade" onRequestClose={() => setStatsOpen(false)}>
         <View style={s.statsOverlay}>
@@ -777,4 +832,12 @@ const s = StyleSheet.create({
   statsStayText: { fontSize: 14, fontWeight: '700', color: C.text2 },
   statsLeave:    { flex: 1, paddingVertical: 14, borderRadius: 12, backgroundColor: C.red + '22', borderWidth: 1, borderColor: C.red + '55', alignItems: 'center' },
   statsLeaveText: { fontSize: 14, fontWeight: '800', color: C.red },
+
+  pinInput: {
+    backgroundColor: C.card, borderWidth: 1.5, borderColor: C.border2,
+    borderRadius: 12, paddingHorizontal: 16, paddingVertical: 14,
+    fontSize: 22, fontWeight: '700', color: C.text, textAlign: 'center',
+    letterSpacing: 6, marginVertical: 8,
+  },
+  pinErrorText: { fontSize: 12, color: C.red, fontWeight: '600', textAlign: 'center', marginTop: -4 },
 });
