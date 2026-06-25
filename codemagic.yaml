@@ -33,6 +33,13 @@ workflows:
           keychain initialize
           echo "$CM_CERTIFICATE" | base64 --decode > /tmp/cert.p12
           keychain add-certificates --certificate /tmp/cert.p12 --certificate-password "$CM_CERTIFICATE_PASSWORD"
+      - name: Install provisioning profile
+        script: |
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+          echo "$CM_PROVISIONING_PROFILE" | base64 --decode > /tmp/wavetalk.mobileprovision
+          UUID=$(security cms -D -i /tmp/wavetalk.mobileprovision | plutil -extract UUID raw -)
+          cp /tmp/wavetalk.mobileprovision "$HOME/Library/MobileDevice/Provisioning Profiles/${UUID}.mobileprovision"
+          echo "Installed profile UUID: $UUID"
       - name: Build IPA
         script: |
           mkdir -p build/ios/ipa
