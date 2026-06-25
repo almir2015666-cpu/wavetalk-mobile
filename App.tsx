@@ -24,8 +24,7 @@ export default function App() {
   };
 
   const handleLogout = () => {
-    setMyCh('geral');
-    setScreen('login');
+    setScreen('channels');
   };
 
   const handleSwitchChannel = () => {

@@ -30,7 +30,7 @@ interface Props {
 }
 
 const ICONS: Record<string, string> = {
-  geral: '📻', operações: '⚙️', 'time-1': '🏃', suporte: '🛠️',
+  'geral-1': '📻', 'geral-2': '📻', 'geral-3': '📻', 'geral-4': '📻',
 };
 
 export default function MainScreen({ myName, myChannel: initChannel, onLogout, onSwitchChannel }: Props) {
@@ -334,8 +334,16 @@ export default function MainScreen({ myName, myChannel: initChannel, onLogout, o
           </TouchableOpacity>
         )}
 
-        <View style={s.pttRow}>
-          {/* Mute toggle (left) */}
+        {/* PTT Button (centered) */}
+        <PTTButton
+          talking={talking}
+          disabled={!connected || channelBusy}
+          onStart={startTalking}
+          onStop={stopTalking}
+        />
+
+        {/* Mute + label row */}
+        <View style={s.pttBottom}>
           <TouchableOpacity
             style={[s.muteBtn, muted && s.muteBtnActive]}
             onPress={() => {
@@ -344,24 +352,10 @@ export default function MainScreen({ myName, myChannel: initChannel, onLogout, o
             }}
             activeOpacity={0.75}
           >
-            <Text style={[s.muteBtnIcon, muted && { color: C.purple }]}>
-              {muted ? '🔇' : '🎤'}
-            </Text>
+            <Text style={s.muteBtnIcon}>{muted ? '🔇' : '🎤'}</Text>
           </TouchableOpacity>
-
-          {/* PTT Button (center) */}
-          <PTTButton
-            talking={talking}
-            disabled={!connected || channelBusy}
-            onStart={startTalking}
-            onStop={stopTalking}
-          />
-
-          {/* Spacer to balance left button */}
-          <View style={{ width: 52 }} />
+          <Text style={[s.pttLabel, { color: pttLabelColor }]}>{pttLabel}</Text>
         </View>
-
-        <Text style={[s.pttLabel, { color: pttLabelColor }]}>{pttLabel}</Text>
       </View>
 
       {/* ── CHANNEL SWITCH MODAL ── */}
@@ -525,23 +519,20 @@ const s = StyleSheet.create({
   },
   micWarningText: { fontSize: 12, color: C.red, fontWeight: '600' },
 
-  pttRow: {
-    flexDirection: 'row', alignItems: 'center',
-    width: '100%', justifyContent: 'center',
-    paddingHorizontal: 32,
+  pttBottom: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    marginTop: -16, marginBottom: 8,
   },
   muteBtn: {
-    width: 52, height: 52, borderRadius: 26,
+    width: 38, height: 38, borderRadius: 19,
     backgroundColor: C.card, borderWidth: 1.5, borderColor: C.border2,
     alignItems: 'center', justifyContent: 'center',
-    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 4,
   },
   muteBtnActive: { borderColor: C.purple, backgroundColor: C.purpleDim },
-  muteBtnIcon:   { fontSize: 22 },
+  muteBtnIcon:   { fontSize: 18 },
 
   pttLabel: {
     fontSize: 13, fontWeight: '600', letterSpacing: 0.3,
-    marginTop: -20, marginBottom: 8,
   },
 
   /* Channel switch modal */

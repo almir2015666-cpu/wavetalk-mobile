@@ -22,17 +22,17 @@ interface Props {
 }
 
 const ICONS: Record<string, string> = {
-  geral:      '📻',
-  operações:  '⚙️',
-  'time-1':   '🏃',
-  suporte:    '🛠️',
+  'geral-1': '📻',
+  'geral-2': '📻',
+  'geral-3': '📻',
+  'geral-4': '📻',
 };
 
 const DEFAULTS: Channel[] = [
-  { name: 'geral',     online: 0, talking: false },
-  { name: 'operações', online: 0, talking: false },
-  { name: 'time-1',    online: 0, talking: false },
-  { name: 'suporte',   online: 0, talking: false },
+  { name: 'geral-1', online: 0, talking: false },
+  { name: 'geral-2', online: 0, talking: false },
+  { name: 'geral-3', online: 0, talking: false },
+  { name: 'geral-4', online: 0, talking: false },
 ];
 
 export default function ChannelPickerScreen({ myName, onJoin, onBack }: Props) {

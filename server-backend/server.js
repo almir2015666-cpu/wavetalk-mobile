@@ -35,7 +35,7 @@ const channels = new Map();
 const users    = new Map();
 const talking  = new Map();
 
-const DEFAULT_CHANNELS = ['geral', 'operações', 'time-1', 'suporte'];
+const DEFAULT_CHANNELS = ['geral-1', 'geral-2', 'geral-3', 'geral-4'];
 
 function boot() {
   DEFAULT_CHANNELS.forEach(ch => {

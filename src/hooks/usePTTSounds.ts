@@ -28,7 +28,7 @@ function buildChirpWav(freqStart: number, freqEnd: number, durationMs: number): 
     phase += (2 * Math.PI * freq) / sampleRate;
     const fadeIn  = Math.min(i / fadeLen, 1);
     const fadeOut = Math.min((n - i) / fadeLen, 1);
-    const sample  = 128 + Math.round(90 * fadeIn * fadeOut * Math.sin(phase));
+    const sample  = 128 + Math.round(118 * fadeIn * fadeOut * Math.sin(phase));
     v.setUint8(44 + i, Math.max(0, Math.min(255, sample)));
   }
 
@@ -39,8 +39,8 @@ function buildChirpWav(freqStart: number, freqEnd: number, durationMs: number): 
 }
 
 // Pre-compute at module load (sync, no I/O)
-const START_WAV_B64 = buildChirpWav(650, 1050, 110); // ascending chirp  — PTT press
-const STOP_WAV_B64  = buildChirpWav(1050, 580, 90);  // descending squelch — PTT release
+const START_WAV_B64 = buildChirpWav(650, 1050, 130); // ascending chirp  — PTT press
+const STOP_WAV_B64  = buildChirpWav(1050, 580, 100); // descending squelch — PTT release
 
 export function usePTTSounds() {
   const startUri = useRef('');
@@ -70,7 +70,7 @@ export function usePTTSounds() {
     try {
       const { sound } = await Audio.Sound.createAsync(
         { uri },
-        { shouldPlay: true, volume: 0.65 }
+        { shouldPlay: true, volume: 1.0 }
       );
       sound.setOnPlaybackStatusUpdate(st => {
         if ('didJustFinish' in st && st.didJustFinish) {
