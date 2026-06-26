@@ -29,11 +29,8 @@ workflows:
 
       - name: Patch Podfile — Xcode 26 antes do pod install
         script: |
-          # Suprime TODOS os warnings nos pods (adiciona -w, remove -Wall -Werror)
           echo "inhibit_all_warnings!" >> ios/Podfile
 
-          # Adiciona post_install que roda por ÚLTIMO (após react_native_post_install)
-          # e força c++17 + desliga warnings-as-errors em TODOS os targets
           cat >> ios/Podfile << 'RUBY'
 
 post_install do |installer|
@@ -42,12 +39,17 @@ post_install do |installer|
       config.build_settings['CLANG_CXX_LANGUAGE_STANDARD'] = 'c++17'
       config.build_settings['GCC_TREAT_WARNINGS_AS_ERRORS'] = 'NO'
       config.build_settings['SWIFT_SUPPRESS_WARNINGS'] = 'YES'
+      # Remove -std=c++20 de OTHER_CPLUSPLUSFLAGS também
+      flags = config.build_settings['OTHER_CPLUSPLUSFLAGS'] || '$(inherited)'
+      config.build_settings['OTHER_CPLUSPLUSFLAGS'] = flags.to_s
+        .gsub('-std=c++20', '-std=c++17')
+        .gsub('-std=gnu++20', '-std=gnu++17')
     end
   end
 end
 RUBY
-          echo "Podfile patched — últimas 15 linhas:"
-          tail -15 ios/Podfile
+          echo "=== Últimas 20 linhas do Podfile ==="
+          tail -20 ios/Podfile
 
       - name: Instalar CocoaPods
         script: |
@@ -74,9 +76,22 @@ RUBY
 
       - name: Gerar .ipa assinado
         script: |
+          set +e
           xcode-project build-ipa \
             --workspace "$XCODE_WORKSPACE" \
             --scheme "$XCODE_SCHEME"
+          BUILD_EXIT=$?
+          if [ $BUILD_EXIT -ne 0 ]; then
+            echo ""
+            echo "====== ERROS DO COMPILADOR ======"
+            for LOG in /tmp/xcodebuild_logs/*.log; do
+              [ -f "$LOG" ] || continue
+              grep -E "^[^:]+:[0-9]+:[0-9]+: error:" "$LOG" | head -40
+              grep -E "^[^:]+:[0-9]+:[0-9]+: fatal error:" "$LOG" | head -10
+            done
+            echo "================================="
+          fi
+          exit $BUILD_EXIT
 
     artifacts:
       - build/ios/ipa/*.ipa
