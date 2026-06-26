@@ -24,42 +24,18 @@ workflows:
       - name: Prebuild iOS
         script: npx expo prebuild --platform ios --clean
 
-      - name: Patch Podfile — Xcode 26 C++ compatibility
-        script: |
-          python3 << 'PYEOF'
-          with open('ios/Podfile', 'r') as f:
-              content = f.read()
-
-          fix = """
-            # Fix: Xcode 26 stricter C++ — fmt, Yoga, Folly compatibility
-            installer.pods_project.targets.each do |target|
-              target.build_configurations.each do |config|
-                config.build_settings['CLANG_CXX_LANGUAGE_STANDARD'] = 'c++17'
-                config.build_settings['CLANG_CXX_LIBRARY'] = 'libc++'
-                config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] ||= ['$(inherited)']
-              end
-            end
-          """
-
-          if 'post_install do |installer|' in content:
-              content = content.replace(
-                  'post_install do |installer|',
-                  'post_install do |installer|\n' + fix,
-                  1
-              )
-          else:
-              content += '\npost_install do |installer|\n' + fix + '\nend\n'
-
-          with open('ios/Podfile', 'w') as f:
-              f.write(content)
-
-          print("Podfile patched for Xcode 26")
-          PYEOF
-
       - name: Install CocoaPods
         script: |
           cd ios
           pod install
+
+      - name: Patch xcconfigs — Xcode 26 C++ compatibility
+        script: |
+          echo "Patching xcconfig files: c++20 → c++17"
+          find ios/Pods -name "*.xcconfig" \
+            -exec sed -i '' 's/CLANG_CXX_LANGUAGE_STANDARD = c++20/CLANG_CXX_LANGUAGE_STANDARD = c++17/g' {} \;
+          echo "Done. Patched files:"
+          find ios/Pods -name "*.xcconfig" | xargs grep -l "CLANG_CXX_LANGUAGE_STANDARD" | head -20
       - name: Set build number
         script: |
           cd ios
