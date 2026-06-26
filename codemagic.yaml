@@ -168,6 +168,7 @@ workflows:
 
       - name: Archive
         script: |
+          set -o pipefail
           mkdir -p /tmp/xcodebuild_logs
           xcodebuild \
             -workspace "$XCODE_WORKSPACE" \
