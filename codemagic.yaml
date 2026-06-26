@@ -26,6 +26,16 @@ workflows:
       - name: Fix Expo versions
         script: npx expo install --fix
 
+      - name: Verify package versions
+        script: |
+          node -e "
+            const pkgs = ['expo-av','expo-task-manager','expo-notifications','expo-haptics','expo-linear-gradient','expo-keep-awake','expo-file-system'];
+            pkgs.forEach(p => {
+              try { console.log(p + ': ' + require('./node_modules/' + p + '/package.json').version); }
+              catch(e) { console.log(p + ': NOT FOUND'); }
+            });
+          "
+
       - name: Prebuild iOS
         script: npx expo prebuild --platform ios --clean
 
@@ -73,6 +83,7 @@ workflows:
             -scheme "$XCODE_SCHEME" \
             -configuration Release \
             -archivePath build/WaveTalk.xcarchive \
+            -quiet \
             COMPILER_INDEX_STORE_ENABLE=NO \
             SWIFT_STRICT_CONCURRENCY=minimal \
             CODE_SIGN_STYLE=Manual \
