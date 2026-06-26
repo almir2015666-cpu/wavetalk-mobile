@@ -3,16 +3,9 @@ workflows:
     name: WaveTalk iOS TestFlight
     max_build_duration: 60
     instance_type: mac_mini_m2
-    triggering:
-      events:
-        - push
-      branch_patterns:
-        - pattern: main
-          include: true
     integrations:
       app_store_connect: appstore_codemagic_admin
     environment:
-      xcode: 26.4
       node: 22
       groups:
         - wavetalk
@@ -20,40 +13,40 @@ workflows:
         BUNDLE_ID: "com.wavetalk.app"
         XCODE_WORKSPACE: "ios/WaveTalk.xcworkspace"
         XCODE_SCHEME: "WaveTalk"
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: main
+          include: true
     scripts:
-      - name: Instalar dependências
+      - name: Install dependencies
         script: npm install --legacy-peer-deps
 
-      - name: Corrigir versões Expo
+      - name: Fix Expo versions
         script: npx expo install --fix
 
       - name: Prebuild iOS
         script: npx expo prebuild --platform ios --clean
 
-      - name: Instalar CocoaPods
-        script: |
-          cd ios
-          pod install
+      - name: Install CocoaPods
+        script: cd ios && pod install
 
-      - name: Remover push notification entitlement
-        script: |
-          /usr/libexec/PlistBuddy -c "Delete :aps-environment" ios/WaveTalk/WaveTalk.entitlements 2>/dev/null || true
+      - name: Set up keychain
+        script: keychain initialize
 
-      - name: Criar/buscar certificado e perfil de distribuição
+      - name: Fetch signing files
         script: |
-          keychain initialize
-          app-store-connect fetch-signing-files "$BUNDLE_ID" --type IOS_APP_STORE --create
+          app-store-connect fetch-signing-files "$BUNDLE_ID" \
+            --type IOS_APP_STORE \
+            --create
           keychain add-certificates
+          xcode-project use-profiles
 
-      - name: Configurar assinatura automática
-        script: xcode-project use-profiles
+      - name: Build number
+        script: cd ios && agvtool new-version -all $(date +%s)
 
-      - name: Definir número de build único
-        script: |
-          cd ios
-          agvtool new-version -all $(date +%s)
-
-      - name: Gerar .ipa assinado
+      - name: Build IPA
         script: |
           xcode-project build-ipa \
             --workspace "$XCODE_WORKSPACE" \
