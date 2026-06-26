@@ -26,25 +26,53 @@ workflows:
       - name: Fix Expo versions
         script: npx expo install --fix
 
+      - name: Patch expo-av source for Expo 56 XCFramework compatibility
+        script: |
+          python3 -c "
+          import os
+
+          # expo-av@16.x imports <ExpoModulesCore/EXEventEmitter.h> which Expo 56
+          # no longer exposes in the prebuilt XCFramework. The compiler resolves
+          # <Framework/H.h> via -F framework paths. The XCFrameworkIntermediates
+          # are created during the build (after ScanDependencies runs), so any
+          # build-phase-level header patches arrive too late. The only reliable fix
+          # is to patch the source file before it is compiled.
+          exav_h = 'node_modules/expo-av/ios/EXAV/EXAV.h'
+          if not os.path.exists(exav_h):
+              print('EXAV.h not found — skip')
+          else:
+              with open(exav_h) as f:
+                  content = f.read()
+              stub = '''/* EXEventEmitter stub: Expo 56 XCFramework does not expose this header */
+          @protocol EXEventEmitter <NSObject>
+          - (NSArray<NSString *> *)supportedEvents;
+          - (void)startObserving;
+          - (void)stopObserving;
+          @end'''
+              orig = '#import <ExpoModulesCore/EXEventEmitter.h>'
+              if orig in content:
+                  with open(exav_h, 'w') as f:
+                      f.write(content.replace(orig, stub))
+                  print('Patched EXAV.h: inline EXEventEmitter protocol stub')
+              else:
+                  print('EXEventEmitter import not present in EXAV.h (already patched or version changed)')
+          "
+
       - name: Prebuild iOS
         script: npx expo prebuild --platform ios --clean
 
       - name: Install CocoaPods
         script: cd ios && pod install
 
-      - name: Patch Pods.xcodeproj for Xcode 26 / Expo 56 compatibility
+      - name: Patch Pods.xcodeproj
         script: |
           ruby << 'RUBY_EOF'
           require 'xcodeproj'
           project = Xcodeproj::Project.open('ios/Pods/Pods.xcodeproj')
 
           project.targets.each do |target|
-            # ----------------------------------------------------------------
-            # EXAV: exclude video Swift files.
-            # WaveTalk is audio-only. The video Swift files (ExpoVideoView.swift,
-            # VideoViewModule.swift) trigger an ExpoModulesCore Clang module
-            # build that fails with Expo 56's prebuilt XCFramework.
-            # ----------------------------------------------------------------
+            # EXAV: exclude video Swift files — WaveTalk is audio-only, and the
+            # Swift video files trigger ExpoModulesCore Clang module build issues
             if target.name == 'EXAV'
               target.build_configurations.each do |config|
                 config.build_settings['EXCLUDED_SOURCE_FILE_NAMES'] = 'ExpoVideoView.swift VideoViewModule.swift'
@@ -52,42 +80,9 @@ workflows:
               puts 'EXAV: excluded video Swift files'
             end
 
-            # ----------------------------------------------------------------
-            # ExpoModulesCore: inject a build phase that creates EXEventEmitter.h
-            # in the XCFrameworkIntermediates directory RIGHT AFTER the Expo
-            # "Switch XCFramework" script copies the framework there.
-            #
-            # Why: expo-av@16.0.8 imports <ExpoModulesCore/EXEventEmitter.h>.
-            # Expo 56 ships ExpoModulesCore as a prebuilt XCFramework that no
-            # longer exposes this header. The compiler resolves <Framework/H.h>
-            # via the -F (framework) search path which points to the
-            # XCFrameworkIntermediates copy, not the source pods directory.
-            # Patching the source directory has no effect; we must patch the
-            # intermediates directory at build time via a shell build phase.
-            # ----------------------------------------------------------------
-            if target.name == 'ExpoModulesCore'
-              patch_script = <<~'SHELL'
-                HEADERS="$BUILT_PRODUCTS_DIR/XCFrameworkIntermediates/ExpoModulesCore/ExpoModulesCore.framework/Headers"
-                if [ ! -d "$HEADERS" ]; then
-                  echo "[WaveTalk] ExpoModulesCore headers dir not found at $HEADERS — skip"
-                  exit 0
-                fi
-                if [ ! -f "$HEADERS/EXEventEmitter.h" ]; then
-                  printf '#pragma once\n#import <Foundation/Foundation.h>\n@protocol EXEventEmitter <NSObject>\n- (NSArray<NSString *> *)supportedEvents;\n- (void)startObserving;\n- (void)stopObserving;\n@end\n' > "$HEADERS/EXEventEmitter.h"
-                  echo "[WaveTalk] Created EXEventEmitter.h in XCFrameworkIntermediates"
-                fi
-              SHELL
-              phase = target.new_shell_script_build_phase('[WaveTalk] Patch ExpoModulesCore Headers')
-              phase.shell_script = patch_script
-              puts 'ExpoModulesCore: added EXEventEmitter.h patch build phase'
-            end
-
-            # ----------------------------------------------------------------
-            # ExpoTaskManager: expo-task-manager 14.x uses legacy RCT bridge
-            # APIs. RN 0.85.3 sets RCT_REMOVE_LEGACY_ARCH=1 in the preprocessor
-            # definitions, which removes those APIs and causes ObjC compile
-            # errors. Override it to 0 so the legacy code still compiles.
-            # ----------------------------------------------------------------
+            # ExpoTaskManager: expo-task-manager 14.x uses legacy RCT bridge APIs.
+            # RN 0.85.3 defines RCT_REMOVE_LEGACY_ARCH=1 which removes those APIs.
+            # Override to 0 so the legacy ObjC code compiles.
             if target.name == 'ExpoTaskManager'
               target.build_configurations.each do |config|
                 existing = Array(config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] || '$(inherited)')
