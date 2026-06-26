@@ -167,9 +167,8 @@ export default function ChannelPickerScreen({ myName, onJoin, onBack }: Props) {
             maxLength={30}
             autoCorrect={false}
             autoCapitalize="none"
-            returnKeyType="next"
+            returnKeyType="done"
             selectionColor={C.cyan}
-            onFocus={() => setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 120)}
           />
           <TextInput
             style={[s.createInput, { marginTop: -4 }]}
@@ -179,10 +178,9 @@ export default function ChannelPickerScreen({ myName, onJoin, onBack }: Props) {
             onChangeText={t => setNewPin(t.replace(/\D/g, '').slice(0, 6))}
             maxLength={6}
             keyboardType="number-pad"
-            returnKeyType="go"
+            returnKeyType="done"
             onSubmitEditing={() => canCreate && handleJoin({ name: newChannel.trim(), online: 0, talking: false })}
             selectionColor={C.cyan}
-            onFocus={() => setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 120)}
           />
 
           <TouchableOpacity
