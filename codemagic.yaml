@@ -107,34 +107,51 @@ workflows:
                   'extern void EXFatal(NSError *);',
           })
 
-          # EXAV.m: EXEventEmitterService is NOT in Expo 56 XCFramework public Headers
-          # (Build 15 confirmed: ScanDependencies failed with "file not found").
-          # UMPromiseResolveBlock/UMPromiseRejectBlock are #define macros from
-          # EXUnimodulesCompat.h (Legacy/) which is absent from the XCFramework module
-          # map. They expand to EXPromise* typedefs that ARE in the PCM (EXDefines.h).
-          # EXFatal/EXErrorWithMessage/EXLog*: absent from XCFramework PCM, provided
-          # via EXAV.h externs (which EXAV.m imports textually at line 13 when
-          # CLANG_EXPLICIT_MODULES_ENABLED=NO, so no duplicate externs needed here).
-          # NOTE: EXAV-Swift.h is NOT patched here -- ExpoVideoView.swift and
-          # VideoViewModule.swift compile normally (EXCLUDED_SOURCE_FILE_NAMES removed),
-          # generating EXAV-Swift.h so the EXAV.modulemap reference stays valid for
-          # ExpoModulesProvider.swift (Build 17 root cause fix).
+          # EXAV.m patches:
+          # 1. EXEventEmitterService.h is absent from Expo 56 XCFramework public Headers
+          #    (Build 15 confirmed: ScanDependencies failed with "file not found").
+          # 2. EXAV-Swift.h is never generated because ExpoVideoView.swift and
+          #    VideoViewModule.swift are excluded via EXCLUDED_SOURCE_FILE_NAMES
+          #    (Build 18 confirmed: those files have Swift API incompatibilities with
+          #    the XCFramework -- Promise.ResolveClosure != EXPromiseResolveBlock).
+          #    The EXAV.modulemap Swift submodule block is removed separately (see
+          #    "Patch EXAV module map" step). Here we replace the #if __has_include
+          #    block with a minimal ExpoVideoView stub + UMPromise* macros.
+          # 3. UMPromiseResolveBlock/UMPromiseRejectBlock: #define macros from
+          #    EXUnimodulesCompat.h (Legacy/), absent from XCFramework module map.
+          # 4. EXFatal/EXErrorWithMessage: also provided via EXAV.h externs, but
+          #    repeated here for clarity since EXAV.m uses them at lines 269-593.
           print('Patching EXAV.m ...')
           patch_file('node_modules/expo-av/ios/EXAV/EXAV.m', {
               '#import <ExpoModulesCore/EXEventEmitterService.h>':
                   '/* EXEventEmitterService: absent from Expo 56 XCFramework public Headers */\n'
                   '@protocol EXEventEmitterService\n'
                   '- (void)sendEventWithName:(NSString *)name body:(id)body;\n'
+                  '@end',
+
+              '#if __has_include(<EXAV/EXAV-Swift.h>)\n'
+              '#import <EXAV/EXAV-Swift.h>\n'
+              '#else\n'
+              '#import "EXAV-Swift.h"\n'
+              '#endif':
+                  '/* EXAV-Swift.h not generated: ExpoVideoView.swift excluded (Build 18:\n'
+                  '   Promise.ResolveClosure incompatible with EXPromiseResolveBlock in\n'
+                  '   the Expo 56 XCFramework Swift API). Full @interface required so\n'
+                  '   [ExpoVideoView class] compiles; returns nil at runtime (no video). */\n'
+                  '@interface ExpoVideoView : NSObject\n'
                   '@end\n'
-                  '/* UMPromiseResolveBlock/UMPromiseRejectBlock: #define macros from\n'
-                  '   EXUnimodulesCompat.h (Legacy/) absent from Expo 56 XCFramework\n'
-                  '   module map. Expand to EXPromise* typedefs that ARE in the PCM. */\n'
+                  '/* UMPromiseResolveBlock/UMPromiseRejectBlock: macros from\n'
+                  '   EXUnimodulesCompat.h (Legacy/) absent from XCFramework module map.\n'
+                  '   Expand to EXPromise* typedefs that ARE in the PCM (EXDefines.h). */\n'
                   '#ifndef UMPromiseResolveBlock\n'
                   '#define UMPromiseResolveBlock EXPromiseResolveBlock\n'
                   '#endif\n'
                   '#ifndef UMPromiseRejectBlock\n'
                   '#define UMPromiseRejectBlock EXPromiseRejectBlock\n'
-                  '#endif',
+                  '#endif\n'
+                  '/* EXFatal/EXErrorWithMessage: absent from Expo 56 XCFramework PCM */\n'
+                  'extern NSError *EXErrorWithMessage(NSString *);\n'
+                  'extern void EXFatal(NSError *);',
           })
 
           print('expo-av patches done.')
@@ -146,6 +163,34 @@ workflows:
       - name: Install CocoaPods
         script: cd ios && pod install
 
+      - name: Patch EXAV module map
+        script: |
+          python3 - << 'PYEOF'
+          import re, os
+
+          # ExpoVideoView.swift and VideoViewModule.swift are excluded via
+          # EXCLUDED_SOURCE_FILE_NAMES because they have Swift API type mismatches
+          # against the Expo 56 XCFramework (Promise.ResolveClosure vs EXPromiseResolveBlock).
+          # Since those files are excluded, the Swift compiler never generates EXAV-Swift.h.
+          # However, CocoaPods auto-generates a 'module EXAV.Swift' block in EXAV.modulemap
+          # that references EXAV-Swift.h. Any Swift code that imports the EXAV module
+          # (ExpoModulesProvider.swift) fails with 'header not found' unless we remove it.
+          path = 'ios/Pods/Target Support Files/EXAV/EXAV.modulemap'
+          if not os.path.exists(path):
+              print(f'WARNING: {path} not found -- check CocoaPods pod name/layout')
+          else:
+              with open(path) as f:
+                  content = f.read()
+              # Remove the entire 'module EXAV.Swift { ... }' block (single-level braces).
+              patched = re.sub(r'\nmodule EXAV\.Swift\s*\{[^}]*\}', '', content)
+              if patched != content:
+                  with open(path, 'w') as f:
+                      f.write(patched)
+                  print('Patched EXAV.modulemap: removed module EXAV.Swift block')
+              else:
+                  print('EXAV.modulemap: module EXAV.Swift block not found (unexpected)')
+          PYEOF
+
       - name: Patch Pods.xcodeproj
         script: |
           ruby << 'RUBY_EOF'
@@ -155,13 +200,15 @@ workflows:
           project.targets.each do |target|
             if target.name == 'EXAV'
               target.build_configurations.each do |config|
-                # Do NOT set EXCLUDED_SOURCE_FILE_NAMES: ExpoVideoView.swift and
-                # VideoViewModule.swift must compile so that Xcode generates EXAV-Swift.h.
-                # The EXAV.modulemap references that header; without it,
-                # ExpoModulesProvider.swift fails with 'could not build ObjC module EXAV'.
+                # Exclude incompatible Swift files: ExpoVideoView.swift and VideoViewModule.swift
+                # fail with Swift API type mismatch against the Expo 56 XCFramework
+                # (Promise.ResolveClosure vs EXPromiseResolveBlock). The EXAV.modulemap
+                # Swift submodule block is removed separately so ExpoModulesProvider.swift
+                # can still import the EXAV ObjC module without EXAV-Swift.h.
+                config.build_settings['EXCLUDED_SOURCE_FILE_NAMES'] = 'ExpoVideoView.swift VideoViewModule.swift'
                 config.build_settings['CLANG_EXPLICIT_MODULES_ENABLED'] = 'NO'
               end
-              puts 'EXAV: disabled explicit modules (Swift files compile normally)'
+              puts 'EXAV: excluded incompatible Swift files, disabled explicit modules'
             end
 
             if target.name == 'ExpoTaskManager'
