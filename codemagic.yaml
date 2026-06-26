@@ -15,7 +15,7 @@ workflows:
       xcode: 26.4
       node: 22
       groups:
-        - ios_signing
+        - wavetalk
       vars:
         BUNDLE_ID: "com.wavetalk.app"
         XCODE_WORKSPACE: "ios/WaveTalk.xcworkspace"
