@@ -69,43 +69,46 @@ workflows:
           })
 
           # ── EXVideoView.h ─────────────────────────────────────────────────────
-          # EXModuleRegistry and EXLegacyExpoViewProtocol were removed from the
-          # Expo 56 XCFramework public headers.
+          # EXModuleRegistry and EXLegacyExpoViewProtocol are not in the Expo 56
+          # XCFramework public Headers/ (import fails at ScanDependencies).
+          # EXModuleRegistry IS still in the ExpoModulesCore PCM (exported via the
+          # umbrella header); using a forward declaration avoids the redefinition
+          # error while still allowing pointer types and method calls (the full
+          # definition arrives from the PCM when ExpoModulesCore loads via EXAV.h).
+          # EXLegacyExpoViewProtocol is NOT in the PCM (removed entirely), so it
+          # needs a full inline protocol stub for the conformance declaration.
           print('Patching EXVideoView.h ...')
           patch_file('node_modules/expo-av/ios/EXAV/Video/EXVideoView.h', {
               '#import <ExpoModulesCore/EXModuleRegistry.h>':
-                  '/* EXModuleRegistry stub (Expo 56: not in XCFramework) */\n'
-                  '@interface EXModuleRegistry : NSObject\n'
-                  '- (id)getModuleImplementingProtocol:(Protocol *)protocol;\n'
-                  '- (id)getModuleOfName:(NSString *)name;\n'
-                  '@end',
+                  '/* EXModuleRegistry: forward-declare only — full definition comes from '
+                  'ExpoModulesCore PCM (loaded via EXModuleRegistryConsumer.h in EXAV.h). '
+                  'Expo 56 removed this header from XCFramework public Headers/. */\n'
+                  '@class EXModuleRegistry;',
 
               '#import <ExpoModulesCore/EXLegacyExpoViewProtocol.h>':
-                  '/* EXLegacyExpoViewProtocol stub (Expo 56: removed) */\n'
+                  '/* EXLegacyExpoViewProtocol stub (Expo 56: removed entirely from PCM) */\n'
                   '@protocol EXLegacyExpoViewProtocol <NSObject>\n'
                   '@optional\n'
                   '@end',
           })
 
           # ── EXVideoView.m ─────────────────────────────────────────────────────
-          # EXUtilities class header removed from XCFramework public headers.
-          # EX_WEAKIFY / EX_ENSURE_STRONGIFY come from EXDefines.h (still present);
-          # guard with #ifndef in case they arrive through EXAV.h → EXExportedModule.h.
-          # EXUtilities implementation is still in the XCFramework binary — we only
-          # need the @interface so the compiler knows the method signature.
+          # EXUtilities IS in the ExpoModulesCore PCM (confirmed: its @interface stub
+          # caused a redefinition error).  Remove the @interface stub entirely and let
+          # the PCM supply the full definition.  EX_WEAKIFY / EX_ENSURE_STRONGIFY are
+          # defined in EXDefines.h (which IS in the XCFramework); guard with #ifndef
+          # so we only define them if they haven't arrived through the PCM yet.
           print('Patching EXVideoView.m ...')
           patch_file('node_modules/expo-av/ios/EXAV/Video/EXVideoView.m', {
               '#import <ExpoModulesCore/EXUtilities.h>':
-                  '/* EXUtilities stub (Expo 56: not in XCFramework public headers) */\n'
+                  '/* EXUtilities: header absent from XCFramework public Headers/ but the '
+                  'class IS in the PCM — no @interface stub needed; PCM provides it. */\n'
                   '#ifndef EX_WEAKIFY\n'
                   '#define EX_WEAKIFY(var) __weak typeof(var) weak_##var = var;\n'
                   '#endif\n'
                   '#ifndef EX_ENSURE_STRONGIFY\n'
                   '#define EX_ENSURE_STRONGIFY(var) __strong typeof(weak_##var) var = weak_##var; if (!var) return;\n'
-                  '#endif\n'
-                  '@interface EXUtilities : NSObject\n'
-                  '+ (void)performSynchronouslyOnMainThread:(void (^)(void))block;\n'
-                  '@end',
+                  '#endif',
           })
 
           # ── EXAV.m ────────────────────────────────────────────────────────────
