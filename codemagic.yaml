@@ -32,22 +32,32 @@ workflows:
           cd ios
           pod install
 
-      - name: Patch C++ — Xcode 26 compatibility (xcconfig + pbxproj)
+      - name: Patch C++ — Xcode 26 compatibility
         script: |
-          echo "=== Patching xcconfig files ==="
-          find ios/Pods -name "*.xcconfig" \
-            -exec sed -i '' 's/CLANG_CXX_LANGUAGE_STANDARD = c++20/CLANG_CXX_LANGUAGE_STANDARD = c++17/g' {} \;
+          PBXPROJ="ios/Pods/Pods.xcodeproj/project.pbxproj"
 
-          echo "=== Patching Pods.xcodeproj/project.pbxproj ==="
-          sed -i '' \
-            's/CLANG_CXX_LANGUAGE_STANDARD = "c++20"/CLANG_CXX_LANGUAGE_STANDARD = "c++17"/g' \
-            ios/Pods/Pods.xcodeproj/project.pbxproj
-          sed -i '' \
-            's/CLANG_CXX_LANGUAGE_STANDARD = c++20/CLANG_CXX_LANGUAGE_STANDARD = c++17/g' \
-            ios/Pods/Pods.xcodeproj/project.pbxproj
+          echo "=== ANTES ==="
+          grep -rh "CLANG_CXX_LANGUAGE_STANDARD" ios/Pods --include="*.xcconfig" | sort -u
+          grep "CLANG_CXX_LANGUAGE_STANDARD" "$PBXPROJ" | head -3
 
-          echo "=== Result ==="
-          grep -r "CLANG_CXX_LANGUAGE_STANDARD" ios/Pods --include="*.xcconfig" --include="*.pbxproj" | grep "c++20" | wc -l | xargs echo "Remaining c++20 occurrences:"
+          echo "=== Patch xcconfigs ==="
+          find ios/Pods -name "*.xcconfig" | while read f; do
+            sed -i '' 's/CLANG_CXX_LANGUAGE_STANDARD = c++20/CLANG_CXX_LANGUAGE_STANDARD = c++17/g' "$f"
+            sed -i '' 's/GCC_TREAT_WARNINGS_AS_ERRORS = YES/GCC_TREAT_WARNINGS_AS_ERRORS = NO/g' "$f"
+            sed -i '' 's/-Werror//g' "$f"
+          done
+
+          echo "=== Patch pbxproj ==="
+          sed -i '' 's/CLANG_CXX_LANGUAGE_STANDARD = "c++20"/CLANG_CXX_LANGUAGE_STANDARD = "c++17"/g' "$PBXPROJ"
+          sed -i '' 's/CLANG_CXX_LANGUAGE_STANDARD = c++20;/CLANG_CXX_LANGUAGE_STANDARD = c++17;/g' "$PBXPROJ"
+          sed -i '' 's/CLANG_CXX_LANGUAGE_STANDARD = c++20 /CLANG_CXX_LANGUAGE_STANDARD = c++17 /g' "$PBXPROJ"
+          sed -i '' 's/GCC_TREAT_WARNINGS_AS_ERRORS = YES/GCC_TREAT_WARNINGS_AS_ERRORS = NO/g' "$PBXPROJ"
+
+          echo "=== DEPOIS ==="
+          grep -rh "CLANG_CXX_LANGUAGE_STANDARD" ios/Pods --include="*.xcconfig" | sort -u
+          grep "CLANG_CXX_LANGUAGE_STANDARD" "$PBXPROJ" | head -3
+          echo "c++20 restantes em xcconfig: $(grep -r 'c++20' ios/Pods --include='*.xcconfig' | wc -l)"
+          echo "c++20 restantes em pbxproj:  $(grep -c 'c++20' "$PBXPROJ" || echo 0)"
 
       - name: Remover push notification entitlement
         script: |
