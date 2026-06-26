@@ -28,35 +28,88 @@ workflows:
 
       - name: Patch expo-av source for Expo 56 XCFramework compatibility
         script: |
-          python3 -c "
+          python3 - << 'PYEOF'
           import os
 
-          # expo-av@16.x imports <ExpoModulesCore/EXEventEmitter.h> which Expo 56
+          # expo-av@16.x uses several <ExpoModulesCore/...> headers that Expo 56
           # no longer exposes in the prebuilt XCFramework. The compiler resolves
-          # <Framework/H.h> via -F framework paths. The XCFrameworkIntermediates
-          # are created during the build (after ScanDependencies runs), so any
-          # build-phase-level header patches arrive too late. The only reliable fix
-          # is to patch the source file before it is compiled.
-          exav_h = 'node_modules/expo-av/ios/EXAV/EXAV.h'
-          if not os.path.exists(exav_h):
-              print('EXAV.h not found — skip')
-          else:
-              with open(exav_h) as f:
+          # <Framework/H.h> via -F framework paths pointing to XCFrameworkIntermediates,
+          # which are created during the build (after ScanDependencies runs). Any
+          # build-phase-level patches arrive too late. The fix is to patch the source
+          # files directly so the imports never hit the -F path at all.
+
+          def patch_file(path, replacements):
+              if not os.path.exists(path):
+                  print(f'{path} not found — skip')
+                  return
+              with open(path) as f:
                   content = f.read()
-              stub = '''/* EXEventEmitter stub: Expo 56 XCFramework does not expose this header */
-          @protocol EXEventEmitter <NSObject>
-          - (NSArray<NSString *> *)supportedEvents;
-          - (void)startObserving;
-          - (void)stopObserving;
-          @end'''
-              orig = '#import <ExpoModulesCore/EXEventEmitter.h>'
-              if orig in content:
-                  with open(exav_h, 'w') as f:
-                      f.write(content.replace(orig, stub))
-                  print('Patched EXAV.h: inline EXEventEmitter protocol stub')
-              else:
-                  print('EXEventEmitter import not present in EXAV.h (already patched or version changed)')
-          "
+              changed = False
+              for orig, stub in replacements.items():
+                  if orig in content:
+                      content = content.replace(orig, stub)
+                      print(f'  Patched: {orig}')
+                      changed = True
+                  else:
+                      print(f'  Already patched or absent: {orig}')
+              if changed:
+                  with open(path, 'w') as f:
+                      f.write(content)
+
+          # ── EXAV.h ────────────────────────────────────────────────────────────
+          print('Patching EXAV.h ...')
+          patch_file('node_modules/expo-av/ios/EXAV/EXAV.h', {
+              '#import <ExpoModulesCore/EXEventEmitter.h>':
+                  '/* EXEventEmitter stub (Expo 56: not in XCFramework) */\n'
+                  '@protocol EXEventEmitter <NSObject>\n'
+                  '- (NSArray<NSString *> *)supportedEvents;\n'
+                  '- (void)startObserving;\n'
+                  '- (void)stopObserving;\n'
+                  '@end',
+          })
+
+          # ── EXVideoView.h ─────────────────────────────────────────────────────
+          # EXModuleRegistry and EXLegacyExpoViewProtocol were removed from the
+          # Expo 56 XCFramework public headers.
+          print('Patching EXVideoView.h ...')
+          patch_file('node_modules/expo-av/ios/EXAV/Video/EXVideoView.h', {
+              '#import <ExpoModulesCore/EXModuleRegistry.h>':
+                  '/* EXModuleRegistry stub (Expo 56: not in XCFramework) */\n'
+                  '@interface EXModuleRegistry : NSObject\n'
+                  '- (id)getModuleImplementingProtocol:(Protocol *)protocol;\n'
+                  '- (id)getModuleOfName:(NSString *)name;\n'
+                  '@end',
+
+              '#import <ExpoModulesCore/EXLegacyExpoViewProtocol.h>':
+                  '/* EXLegacyExpoViewProtocol stub (Expo 56: removed) */\n'
+                  '@protocol EXLegacyExpoViewProtocol <NSObject>\n'
+                  '@optional\n'
+                  '@end',
+          })
+
+          # ── EXVideoView.m ─────────────────────────────────────────────────────
+          # EXUtilities class header removed from XCFramework public headers.
+          # EX_WEAKIFY / EX_ENSURE_STRONGIFY come from EXDefines.h (still present);
+          # guard with #ifndef in case they arrive through EXAV.h → EXExportedModule.h.
+          # EXUtilities implementation is still in the XCFramework binary — we only
+          # need the @interface so the compiler knows the method signature.
+          print('Patching EXVideoView.m ...')
+          patch_file('node_modules/expo-av/ios/EXAV/Video/EXVideoView.m', {
+              '#import <ExpoModulesCore/EXUtilities.h>':
+                  '/* EXUtilities stub (Expo 56: not in XCFramework public headers) */\n'
+                  '#ifndef EX_WEAKIFY\n'
+                  '#define EX_WEAKIFY(var) __weak typeof(var) weak_##var = var;\n'
+                  '#endif\n'
+                  '#ifndef EX_ENSURE_STRONGIFY\n'
+                  '#define EX_ENSURE_STRONGIFY(var) __strong typeof(weak_##var) var = weak_##var; if (!var) return;\n'
+                  '#endif\n'
+                  '@interface EXUtilities : NSObject\n'
+                  '+ (void)performSynchronouslyOnMainThread:(void (^)(void))block;\n'
+                  '@end',
+          })
+
+          print('expo-av patches done.')
+          PYEOF
 
       - name: Prebuild iOS
         script: npx expo prebuild --platform ios --clean
