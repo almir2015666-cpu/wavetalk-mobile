@@ -33,31 +33,43 @@ workflows:
           const fs = require('fs');
           const q = String.fromCharCode(39);
           let c = fs.readFileSync('ios/Podfile', 'utf8');
+          const lines = c.split('\n');
 
+          // Encontrar post_install do |installer| e sua indentacao
+          let piLine = -1, piIndent = '';
+          for (let i = 0; i < lines.length; i++) {
+            if (lines[i].includes('post_install do |installer|')) {
+              piLine = i; piIndent = lines[i].match(/^( *)/)[1]; break;
+            }
+          }
+          if (piLine === -1) { console.log('ERROR: post_install not found'); process.exit(1); }
+          console.log('post_install at line ' + piLine + ', indent=[' + piIndent + ']');
+
+          // Injetar com indentacao correta (piIndent + 2 espacos)
+          const inner = piIndent + '  ';
           const inject = [
-            '  installer.pods_project.targets.each do |target|',
-            '    target.build_configurations.each do |config|',
-            '      config.build_settings[' + q + 'CLANG_CXX_LANGUAGE_STANDARD' + q + '] = ' + q + 'c++17' + q,
-            '      config.build_settings[' + q + 'GCC_TREAT_WARNINGS_AS_ERRORS' + q + '] = ' + q + 'NO' + q,
-            '      config.build_settings[' + q + 'SWIFT_SUPPRESS_WARNINGS' + q + '] = ' + q + 'YES' + q,
-            '    end',
-            '  end'
+            inner + 'installer.pods_project.targets.each do |target|',
+            inner + '  target.build_configurations.each do |config|',
+            inner + '    config.build_settings[' + q + 'CLANG_CXX_LANGUAGE_STANDARD' + q + '] = ' + q + 'c++17' + q,
+            inner + '    config.build_settings[' + q + 'GCC_TREAT_WARNINGS_AS_ERRORS' + q + '] = ' + q + 'NO' + q,
+            inner + '    config.build_settings[' + q + 'SWIFT_SUPPRESS_WARNINGS' + q + '] = ' + q + 'YES' + q,
+            inner + '  end',
+            inner + 'end'
           ].join('\n');
 
-          // Injeta antes do ultimo 'end' do arquivo (fecha o post_install do block)
-          const lines = c.split('\n');
-          let lastEnd = -1;
-          for (let i = lines.length - 1; i >= 0; i--) {
-            if (lines[i] === 'end') { lastEnd = i; break; }
+          // Encontrar o 'end' com MESMA indentacao do post_install (fecha o bloco)
+          const closer = piIndent + 'end';
+          let inserted = false;
+          for (let i = piLine + 1; i < lines.length; i++) {
+            if (lines[i] === closer) {
+              lines.splice(i, 0, inject);
+              console.log('Injected before line ' + i);
+              inserted = true; break;
+            }
           }
-          if (lastEnd !== -1) {
-            lines.splice(lastEnd, 0, inject);
-            c = lines.join('\n');
-            console.log('Injected before line ' + lastEnd);
-          } else {
-            console.log('WARNING: last end not found!');
-          }
+          if (!inserted) { console.log('ERROR: matching end not found'); process.exit(1); }
 
+          c = lines.join('\n');
           if (!c.includes('inhibit_all_warnings!')) c = 'inhibit_all_warnings!\n' + c;
           fs.writeFileSync('ios/Podfile', c);
           console.log('Done!');
