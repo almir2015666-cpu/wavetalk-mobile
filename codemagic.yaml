@@ -29,27 +29,19 @@ workflows:
 
       - name: Patch Podfile — Xcode 26 antes do pod install
         script: |
-          echo "inhibit_all_warnings!" >> ios/Podfile
-
-          cat >> ios/Podfile << 'RUBY'
-
-post_install do |installer|
-  installer.pods_project.targets.each do |target|
-    target.build_configurations.each do |config|
-      config.build_settings['CLANG_CXX_LANGUAGE_STANDARD'] = 'c++17'
-      config.build_settings['GCC_TREAT_WARNINGS_AS_ERRORS'] = 'NO'
-      config.build_settings['SWIFT_SUPPRESS_WARNINGS'] = 'YES'
-      # Remove -std=c++20 de OTHER_CPLUSPLUSFLAGS também
-      flags = config.build_settings['OTHER_CPLUSPLUSFLAGS'] || '$(inherited)'
-      config.build_settings['OTHER_CPLUSPLUSFLAGS'] = flags.to_s
-        .gsub('-std=c++20', '-std=c++17')
-        .gsub('-std=gnu++20', '-std=gnu++17')
-    end
-  end
-end
-RUBY
-          echo "=== Últimas 20 linhas do Podfile ==="
-          tail -20 ios/Podfile
+          # Usa printf em vez de heredoc para evitar problemas de indentação YAML
+          printf '\ninhibit_all_warnings!\n' >> ios/Podfile
+          printf '\npost_install do |installer|\n' >> ios/Podfile
+          printf '  installer.pods_project.targets.each do |target|\n' >> ios/Podfile
+          printf '    target.build_configurations.each do |config|\n' >> ios/Podfile
+          printf "      config.build_settings['CLANG_CXX_LANGUAGE_STANDARD'] = 'c++17'\n" >> ios/Podfile
+          printf "      config.build_settings['GCC_TREAT_WARNINGS_AS_ERRORS'] = 'NO'\n" >> ios/Podfile
+          printf "      config.build_settings['SWIFT_SUPPRESS_WARNINGS'] = 'YES'\n" >> ios/Podfile
+          printf "      flags = config.build_settings['OTHER_CPLUSPLUSFLAGS'] || '\$(inherited)'\n" >> ios/Podfile
+          printf "      config.build_settings['OTHER_CPLUSPLUSFLAGS'] = flags.to_s.gsub('-std=c++20','-std=c++17').gsub('-std=gnu++20','-std=gnu++17')\n" >> ios/Podfile
+          printf '    end\n  end\nend\n' >> ios/Podfile
+          echo "=== Últimas 25 linhas do Podfile ==="
+          tail -25 ios/Podfile
 
       - name: Instalar CocoaPods
         script: |
@@ -83,11 +75,20 @@ RUBY
           BUILD_EXIT=$?
           if [ $BUILD_EXIT -ne 0 ]; then
             echo ""
+            echo "====== LOGS DISPONIVEIS ======"
+            ls /tmp/xcodebuild_logs/ 2>/dev/null || echo "(sem logs em /tmp/xcodebuild_logs)"
+            echo ""
             echo "====== ERROS DO COMPILADOR ======"
             for LOG in /tmp/xcodebuild_logs/*.log; do
               [ -f "$LOG" ] || continue
-              grep -E "^[^:]+:[0-9]+:[0-9]+: error:" "$LOG" | head -40
-              grep -E "^[^:]+:[0-9]+:[0-9]+: fatal error:" "$LOG" | head -10
+              echo "--- $LOG ---"
+              grep -i "error:" "$LOG" | grep -v "^note:" | grep -v "warning:" | head -60
+            done
+            echo ""
+            echo "====== ULTIMAS 80 LINHAS DO LOG ======"
+            for LOG in /tmp/xcodebuild_logs/*.log; do
+              [ -f "$LOG" ] || continue
+              tail -80 "$LOG"
             done
             echo "================================="
           fi
