@@ -33,11 +33,34 @@ workflows:
           const fs = require('fs');
           const q = String.fromCharCode(39);
           let c = fs.readFileSync('ios/Podfile', 'utf8');
-          const inject = '\n  installer.pods_project.targets.each do |target|\n    target.build_configurations.each do |config|\n      config.build_settings[' + q + 'CLANG_CXX_LANGUAGE_STANDARD' + q + '] = ' + q + 'c++17' + q + '\n      config.build_settings[' + q + 'GCC_TREAT_WARNINGS_AS_ERRORS' + q + '] = ' + q + 'NO' + q + '\n      config.build_settings[' + q + 'SWIFT_SUPPRESS_WARNINGS' + q + '] = ' + q + 'YES' + q + '\n    end\n  end';
-          c = c.replace(/react_native_post_install\([\s\S]*?\)/, m => m + inject);
+
+          const inject = [
+            '  installer.pods_project.targets.each do |target|',
+            '    target.build_configurations.each do |config|',
+            '      config.build_settings[' + q + 'CLANG_CXX_LANGUAGE_STANDARD' + q + '] = ' + q + 'c++17' + q,
+            '      config.build_settings[' + q + 'GCC_TREAT_WARNINGS_AS_ERRORS' + q + '] = ' + q + 'NO' + q,
+            '      config.build_settings[' + q + 'SWIFT_SUPPRESS_WARNINGS' + q + '] = ' + q + 'YES' + q,
+            '    end',
+            '  end'
+          ].join('\n');
+
+          // Injeta antes do ultimo 'end' do arquivo (fecha o post_install do block)
+          const lines = c.split('\n');
+          let lastEnd = -1;
+          for (let i = lines.length - 1; i >= 0; i--) {
+            if (lines[i] === 'end') { lastEnd = i; break; }
+          }
+          if (lastEnd !== -1) {
+            lines.splice(lastEnd, 0, inject);
+            c = lines.join('\n');
+            console.log('Injected before line ' + lastEnd);
+          } else {
+            console.log('WARNING: last end not found!');
+          }
+
           if (!c.includes('inhibit_all_warnings!')) c = 'inhibit_all_warnings!\n' + c;
           fs.writeFileSync('ios/Podfile', c);
-          console.log('Podfile patched!');
+          console.log('Done!');
           "
           echo "=== Últimas 30 linhas do Podfile ==="
           tail -30 ios/Podfile
