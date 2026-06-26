@@ -213,6 +213,7 @@ workflows:
 
       - name: Archive
         script: |
+          mkdir -p build
           xcodebuild \
             -workspace "$XCODE_WORKSPACE" \
             -scheme "$XCODE_SCHEME" \
@@ -222,7 +223,15 @@ workflows:
             CODE_SIGN_IDENTITY="Apple Distribution" \
             PROVISIONING_PROFILE_SPECIFIER="wavetalk-appstore" \
             DEVELOPMENT_TEAM=66U94U6Q5H \
-            archive
+            archive \
+            2>&1 | tee build/xcodebuild.log
+          BUILD_EC=${PIPESTATUS[0]}
+          if [ $BUILD_EC -ne 0 ]; then
+            echo "=== COMPILATION ERRORS (first 80) ==="
+            grep -n " error:" build/xcodebuild.log | grep -v "note:\|warning:" | head -80 || true
+            echo "=== END ERRORS ==="
+          fi
+          exit $BUILD_EC
 
       - name: Export IPA
         script: |
@@ -233,6 +242,7 @@ workflows:
 
     artifacts:
       - build/*.ipa
+      - build/xcodebuild.log
 
     publishing:
       app_store_connect:
