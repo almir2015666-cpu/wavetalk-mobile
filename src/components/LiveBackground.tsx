@@ -68,12 +68,12 @@ function Blob({ color, size, fromX, fromY, toX, toY, dur, delay, opacity }: Blob
 export default function LiveBackground() {
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="none">
-      <Blob color={C.cyan}   size={320} fromX={-40}   fromY={80}     toX={W * 0.6}  toY={180}     dur={9000}  delay={0}    opacity={0.30} />
-      <Blob color={C.purple} size={280} fromX={W + 40} fromY={60}    toX={W * 0.2}  toY={220}     dur={11000} delay={1500} opacity={0.25} />
-      <Blob color={C.cyan}   size={240} fromX={W * 0.1} fromY={H * 0.4} toX={W * 0.7} toY={H * 0.5} dur={13000} delay={500}  opacity={0.22} />
-      <Blob color={C.purple} size={260} fromX={W * 0.8} fromY={H * 0.55} toX={W * 0.1} toY={H * 0.6} dur={10000} delay={3000} opacity={0.20} />
-      <Blob color={C.cyan}   size={200} fromX={W * 0.3} fromY={H * 0.75} toX={W * 0.8} toY={H * 0.8} dur={12000} delay={2000} opacity={0.18} />
-      <Blob color={C.purple} size={180} fromX={W * 0.6} fromY={H * 0.85} toX={-20}    toY={H * 0.9} dur={14000} delay={4000} opacity={0.16} />
+      <Blob color={C.cyan}   size={320} fromX={-60}      fromY={60}       toX={W * 0.55} toY={200}      dur={28000} delay={0}     opacity={0.28} />
+      <Blob color={C.purple} size={290} fromX={W + 40}   fromY={40}       toX={W * 0.15} toY={240}      dur={34000} delay={5000}  opacity={0.22} />
+      <Blob color={C.cyan}   size={250} fromX={W * 0.05} fromY={H * 0.38} toX={W * 0.72} toY={H * 0.48} dur={30000} delay={2000}  opacity={0.20} />
+      <Blob color={C.purple} size={270} fromX={W * 0.82} fromY={H * 0.52} toX={W * 0.08} toY={H * 0.60} dur={38000} delay={8000}  opacity={0.18} />
+      <Blob color={C.cyan}   size={210} fromX={W * 0.25} fromY={H * 0.72} toX={W * 0.78} toY={H * 0.78} dur={32000} delay={4000}  opacity={0.16} />
+      <Blob color={C.purple} size={190} fromX={W * 0.65} fromY={H * 0.84} toX={-20}      toY={H * 0.88} dur={36000} delay={11000} opacity={0.14} />
     </View>
   );
 }

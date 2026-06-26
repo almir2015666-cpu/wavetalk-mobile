@@ -9,6 +9,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { C } from '../theme';
 import { SERVER_URL } from '../config';
+import LiveBackground from '../components/LiveBackground';
 
 const CHANNEL_MAX = 20;
 
@@ -113,9 +114,7 @@ export default function ChannelPickerScreen({ myName, onJoin, onBack }: Props) {
     >
       <StatusBar style="light" />
 
-      {/* Background glows */}
-      <View style={s.glow1} pointerEvents="none" />
-      <View style={s.glow2} pointerEvents="none" />
+      <LiveBackground />
 
       {/* Header */}
       <View style={s.header}>
@@ -314,15 +313,6 @@ export default function ChannelPickerScreen({ myName, onJoin, onBack }: Props) {
 
 const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: C.bg },
-
-  glow1: {
-    position: 'absolute', width: 280, height: 280, borderRadius: 140,
-    backgroundColor: C.cyan, opacity: 0.06, top: -60, left: -60,
-  },
-  glow2: {
-    position: 'absolute', width: 200, height: 200, borderRadius: 100,
-    backgroundColor: C.purple, opacity: 0.08, top: 80, right: -40,
-  },
 
   header: {
     height: 54, flexDirection: 'row', alignItems: 'center',
