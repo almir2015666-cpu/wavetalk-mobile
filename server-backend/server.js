@@ -35,6 +35,8 @@ const channels    = new Map();
 const users       = new Map();
 const talking     = new Map();
 const channelPins = new Map(); // channelKey → pin (string)
+const channelMods = new Map(); // channelKey → socketId of mod
+const channelMuted = new Map(); // channelKey → Set<socketId>
 
 const DEFAULT_CHANNELS = ['geral-1', 'geral-2', 'geral-3', 'geral-4'];
 const CHANNEL_MAX      = 20;
@@ -48,12 +50,22 @@ function boot() {
 
 function getOrCreate(name) {
   const k = name.toLowerCase().trim().slice(0, 30);
-  if (!channels.has(k)) { channels.set(k, new Set()); talking.set(k, null); }
+  if (!channels.has(k)) {
+    channels.set(k, new Set());
+    talking.set(k, null);
+    channelMuted.set(k, new Set());
+  }
   return k;
 }
 
 function channelUsers(key) {
-  return [...(channels.get(key) || [])].map(id => users.get(id)).filter(Boolean);
+  const modId  = channelMods.get(key);
+  const muted  = channelMuted.get(key) || new Set();
+  return [...(channels.get(key) || [])].map(id => {
+    const u = users.get(id);
+    if (!u) return null;
+    return { ...u, isMod: id === modId, isMuted: muted.has(id) };
+  }).filter(Boolean);
 }
 
 function broadcastChannel(key) {
@@ -67,15 +79,21 @@ function broadcastChannel(key) {
 function leaveChannel(socket, key) {
   if (!key || !channels.has(key)) return;
   channels.get(key).delete(socket.id);
+  channelMuted.get(key)?.delete(socket.id);
   socket.leave(key);
   if (talking.get(key) === socket.id) {
     talking.set(key, null);
     io.to(key).emit('ptt:stop', { userId: socket.id, name: users.get(socket.id)?.name, duration: '0:00' });
   }
-  // Notify remaining peers to tear down WebRTC connection
+  // Reassign mod if mod left
+  if (channelMods.get(key) === socket.id) {
+    const remaining = [...channels.get(key)];
+    if (remaining.length > 0) channelMods.set(key, remaining[0]);
+    else channelMods.delete(key);
+  }
   socket.to(key).emit('webrtc:peer-left', { peerId: socket.id });
   if (channels.get(key).size === 0 && !DEFAULT_CHANNELS.includes(key)) {
-    channels.delete(key); talking.delete(key);
+    channels.delete(key); talking.delete(key); channelMuted.delete(key); channelMods.delete(key);
   } else {
     broadcastChannel(key);
   }
@@ -135,6 +153,8 @@ io.on('connection', (socket) => {
     users.set(socket.id, user);
     channels.get(channelKey).add(socket.id);
     socket.join(channelKey);
+    // First to join becomes mod
+    if (!channelMods.has(channelKey)) channelMods.set(channelKey, socket.id);
 
     // Peers already in channel (excluding self)
     const existingPeerIds = [...channels.get(channelKey)].filter(id => id !== socket.id);
@@ -177,11 +197,53 @@ io.on('connection', (socket) => {
     broadcastChannel(user.channel);
   });
 
+  /* ── MOD ACTIONS ── */
+  socket.on('mod:kick', ({ userId }) => {
+    const mod = users.get(socket.id);
+    if (!mod || channelMods.get(mod.channel) !== socket.id) return;
+    const target = users.get(userId);
+    if (!target || target.channel !== mod.channel) return;
+    const targetSocket = io.sockets.sockets.get(userId);
+    if (targetSocket) {
+      targetSocket.emit('mod:kicked', { by: mod.name });
+      leaveChannel(targetSocket, mod.channel);
+      users.delete(userId);
+    }
+    console.log(`  kick  ${mod.name} expelled ${target.name} from #${mod.channel}`);
+  });
+
+  socket.on('mod:mute', ({ userId }) => {
+    const mod = users.get(socket.id);
+    if (!mod || channelMods.get(mod.channel) !== socket.id) return;
+    const muted = channelMuted.get(mod.channel);
+    if (!muted) return;
+    if (muted.has(userId)) {
+      muted.delete(userId);
+      io.to(userId).emit('mod:unmuted', { by: mod.name });
+    } else {
+      muted.add(userId);
+      io.to(userId).emit('mod:muted', { by: mod.name });
+      // Force stop PTT if they're talking
+      if (talking.get(mod.channel) === userId) {
+        const tu = users.get(userId);
+        if (tu) { tu.talking = false; tu.talkStart = null; }
+        talking.set(mod.channel, null);
+        io.to(mod.channel).emit('ptt:stop', { userId, name: users.get(userId)?.name, duration: '0:00' });
+      }
+    }
+    broadcastChannel(mod.channel);
+  });
+
   /* ── PTT START ── */
   socket.on('ptt:start', () => {
     const user = users.get(socket.id);
     if (!user) return;
     const ch = user.channel;
+    // Block if muted by mod
+    if (channelMuted.get(ch)?.has(socket.id)) {
+      socket.emit('ptt:blocked', { by: 'moderador' });
+      return;
+    }
     const cur = talking.get(ch);
     if (cur && cur !== socket.id) {
       socket.emit('ptt:blocked', { by: users.get(cur)?.name || 'alguém' });

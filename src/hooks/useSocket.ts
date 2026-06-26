@@ -4,7 +4,7 @@ import { SERVER_URL } from '../config';
 
 export { SERVER_URL };
 
-export type User = { id: string; name: string; channel: string; talking: boolean; status?: string };
+export type User = { id: string; name: string; channel: string; talking: boolean; status?: string; isMod?: boolean; isMuted?: boolean };
 
 export interface SocketCallbacks {
   onJoined:        (users: User[], existingPeers: {id:string;name:string}[]) => void;
@@ -17,6 +17,9 @@ export interface SocketCallbacks {
   onConnect:       () => void;
   onDisconnect:    () => void;
   onJoinRejected?: (reason: string, channel: string) => void;
+  onKicked?:       (by: string) => void;
+  onMuted?:        (by: string) => void;
+  onUnmuted?:      (by: string) => void;
 }
 
 export function useSocket(callbacks: SocketCallbacks) {
@@ -56,6 +59,9 @@ export function useSocket(callbacks: SocketCallbacks) {
     s.on('audio:recv',     ({ data, from, name }: any)     => cbRef.current.onAudioRecv(data, from, name));
     s.on('pong:server',    (ts: number)                    => cbRef.current.onPing(Date.now() - ts));
     s.on('join:rejected',  ({ reason, channel }: any)      => cbRef.current.onJoinRejected?.(reason, channel));
+    s.on('mod:kicked',     ({ by }: any)                   => cbRef.current.onKicked?.(by));
+    s.on('mod:muted',      ({ by }: any)                   => cbRef.current.onMuted?.(by));
+    s.on('mod:unmuted',    ({ by }: any)                   => cbRef.current.onUnmuted?.(by));
 
     return () => {
       clearInterval(pingTimer.current!);
@@ -69,6 +75,8 @@ export function useSocket(callbacks: SocketCallbacks) {
   const sendAudio = useCallback((data: string) => socketRef.current?.emit('audio:send', { data }), []);
   const getId     = useCallback(() => socketRef.current?.id ?? '', []);
   const setStatus = useCallback((status: string) => socketRef.current?.emit('status:set', status), []);
+  const modKick   = useCallback((userId: string) => socketRef.current?.emit('mod:kick', { userId }), []);
+  const modMute   = useCallback((userId: string) => socketRef.current?.emit('mod:mute', { userId }), []);
 
-  return { join, pttStart, pttStop, sendAudio, getId, setStatus };
+  return { join, pttStart, pttStop, sendAudio, getId, setStatus, modKick, modMute };
 }

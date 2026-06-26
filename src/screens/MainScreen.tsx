@@ -2,7 +2,7 @@ import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
   Animated, Modal, ActivityIndicator, Share, TextInput,
-  KeyboardAvoidingView, Platform,
+  KeyboardAvoidingView, Platform, Alert,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
@@ -99,6 +99,11 @@ export default function MainScreen({ myName, myChannel: initChannel, myPin, myCh
   const [statusModal,   setStatusModal]  = useState(false);
   const myStatusRef = useRef<UserStatus>('available');
 
+  // Moderator
+  const [iAmMod,        setIAmMod]       = useState(false);
+  const [modTarget,     setModTarget]    = useState<User | null>(null);
+  const [mutedByMod,    setMutedByMod]   = useState(false);
+
   const bannerAnim = useRef(new Animated.Value(0)).current;
   const myId       = useRef('');
   const talkStart  = useRef(0);
@@ -147,7 +152,7 @@ export default function MainScreen({ myName, myChannel: initChannel, myPin, myCh
     setLog(prev => [{ id: String(Date.now()), name, duration, ts, audio: audioData }, ...prev].slice(0, 50));
   }, []);
 
-  const { join, pttStart, pttStop, sendAudio, getId, setStatus } = useSocket({
+  const { join, pttStart, pttStop, sendAudio, getId, setStatus, modKick, modMute } = useSocket({
     onConnect: () => {
       setConnected(true); setReconnecting(false); setFullBanner(false);
       myId.current = getId();
@@ -161,6 +166,8 @@ export default function MainScreen({ myName, myChannel: initChannel, myPin, myCh
     onJoined:        (list) => { myId.current = getId(); setUsers(list); },
     onChannelUpdate: (list, talker) => {
       setUsers(list); setTalkerId(talker);
+      const me = list.find(u => u.id === myId.current);
+      if (me) setIAmMod(!!me.isMod);
       if (talker && talker !== myId.current) {
         const u = list.find(u => u.id === talker);
         if (u) {
@@ -218,6 +225,23 @@ export default function MainScreen({ myName, myChannel: initChannel, myPin, myCh
         setPinModal(true);
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
       }
+    },
+    onKicked: (by) => {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
+      Alert.alert('Expulso do canal', `${by} removeu você do canal.`, [
+        { text: 'OK', onPress: onLogout },
+      ]);
+    },
+    onMuted: (by) => {
+      setMutedByMod(true);
+      setMuted(true);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+      Alert.alert('Microfone bloqueado', `${by} silenciou você neste canal.`);
+    },
+    onUnmuted: (by) => {
+      setMutedByMod(false);
+      setMuted(false);
+      Alert.alert('Microfone liberado', `${by} desmutou você.`);
     },
   });
 
@@ -441,6 +465,14 @@ export default function MainScreen({ myName, myChannel: initChannel, myPin, myCh
         </View>
       )}
 
+      {/* ── MUTED BY MOD BANNER ── */}
+      {mutedByMod && (
+        <View style={[s.reconnBanner, { backgroundColor: C.red + '18', borderBottomColor: C.red + '44' }]}>
+          <Text style={{ fontSize: 14 }}>🔇</Text>
+          <Text style={[s.reconnText, { color: C.red }]}>Silenciado pelo moderador</Text>
+        </View>
+      )}
+
       {/* ── VISUALIZER ── */}
       <View style={s.vizWrap}>
         <Visualizer active={talking || isPeerTalking} isPeer={isPeerTalking} />
@@ -470,18 +502,27 @@ export default function MainScreen({ myName, myChannel: initChannel, myPin, myCh
             const isTalker  = u.id === talkerId;
             const uStatus   = (isMe ? myStatus : (u.status ?? 'available')) as UserStatus;
             const sCfg      = STATUS_CONFIG[uStatus];
+            const canMod    = iAmMod && !isMe;
             return (
-              <View key={u.id} style={[s.userPill, isMe && s.userPillMe, isTalker && s.userPillTalker]}>
+              <TouchableOpacity
+                key={u.id}
+                style={[s.userPill, isMe && s.userPillMe, isTalker && s.userPillTalker]}
+                onPress={() => canMod ? setModTarget(u) : undefined}
+                activeOpacity={canMod ? 0.7 : 1}
+              >
                 <View style={{ position: 'relative' }}>
                   <LinearGradient colors={[c1, c2]} style={s.pillAvatar}>
                     <Text style={s.pillAvatarText}>{u.name[0]?.toUpperCase()}</Text>
                   </LinearGradient>
                   <View style={[s.pillStatusDot, { backgroundColor: sCfg.color }]} />
                 </View>
-                <Text style={s.pillName} numberOfLines={1}>{isMe ? 'Você' : u.name.split(' ')[0]}</Text>
+                <Text style={s.pillName} numberOfLines={1}>
+                  {isMe ? 'Você' : u.name.split(' ')[0]}
+                </Text>
+                {u.isMod  && <Text style={s.pillMic}>👑</Text>}
                 {isTalker && <Text style={s.pillMic}>🎙</Text>}
-                {isMe && muted && <Text style={s.pillMic}>🔇</Text>}
-              </View>
+                {(isMe ? muted : u.isMuted) && <Text style={s.pillMic}>🔇</Text>}
+              </TouchableOpacity>
             );
           })}
         </ScrollView>
@@ -738,6 +779,52 @@ export default function MainScreen({ myName, myChannel: initChannel, myPin, myCh
           </View>
           <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => setPinModal(false)} />
         </KeyboardAvoidingView>
+      </Modal>
+
+      {/* ── MOD ACTION MODAL ── */}
+      <Modal visible={modTarget !== null} transparent animationType="fade" onRequestClose={() => setModTarget(null)}>
+        <TouchableOpacity style={s.statsOverlay} activeOpacity={1} onPress={() => setModTarget(null)}>
+          <View style={[s.statsSheet, { paddingVertical: 20 }]}>
+            <Text style={[s.statsTitle, { marginBottom: 4 }]}>Moderar</Text>
+            <Text style={[s.statsSub, { marginBottom: 16 }]}>{modTarget?.name}</Text>
+
+            <TouchableOpacity
+              style={[s.statusOption, { backgroundColor: C.card }]}
+              activeOpacity={0.75}
+              onPress={() => {
+                if (!modTarget) return;
+                modMute(modTarget.id);
+                setModTarget(null);
+              }}
+            >
+              <Text style={{ fontSize: 20 }}>{modTarget?.isMuted ? '🔊' : '🔇'}</Text>
+              <Text style={s.statusOptionLabel}>
+                {modTarget?.isMuted ? 'Desmutar' : 'Silenciar microfone'}
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[s.statusOption, { backgroundColor: C.red + '18', marginTop: 6 }]}
+              activeOpacity={0.75}
+              onPress={() => {
+                if (!modTarget) return;
+                const t = modTarget;
+                setModTarget(null);
+                Alert.alert(
+                  'Expulsar usuário',
+                  `Tem certeza que quer expulsar ${t.name} do canal?`,
+                  [
+                    { text: 'Cancelar', style: 'cancel' },
+                    { text: 'Expulsar', style: 'destructive', onPress: () => modKick(t.id) },
+                  ]
+                );
+              }}
+            >
+              <Text style={{ fontSize: 20 }}>🚫</Text>
+              <Text style={[s.statusOptionLabel, { color: C.red }]}>Expulsar do canal</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
       </Modal>
 
       {/* ── STATUS MODAL ── */}
