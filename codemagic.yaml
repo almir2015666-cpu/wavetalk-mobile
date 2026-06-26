@@ -32,6 +32,16 @@ workflows:
       - name: Install CocoaPods
         script: cd ios && pod install
 
+      - name: Fix Swift 6 compatibility for pods
+        script: |
+          ruby -e '
+            Dir.glob("ios/Pods/Target Support Files/**/*.xcconfig") do |f|
+              content = File.read(f)
+              next if content.include?("SWIFT_STRICT_CONCURRENCY")
+              File.write(f, content + "\nSWIFT_STRICT_CONCURRENCY = minimal\n")
+            end
+          '
+
       - name: Remove push notification entitlement
         script: /usr/libexec/PlistBuddy -c "Delete :aps-environment" ios/WaveTalk/WaveTalk.entitlements 2>/dev/null || true
 
