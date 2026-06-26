@@ -32,8 +32,14 @@ const SLIDES: Slide[] = [
   {
     icon:  '📡',
     title: 'Canais separados',
-    body:  'Crie grupos privados ou entre em canais públicos. Cada canal é uma conversa independente.',
+    body:  'Entre em canais públicos ou crie o seu com PIN secreto. Cada canal é uma conversa independente.',
     color: C.purple,
+  },
+  {
+    icon:  '🟢',
+    title: 'Seu status, suas regras',
+    body:  'Disponível · Ocupado · Silencioso\n\nOcupado bloqueia áudios recebidos. Silencioso desliga seu microfone. Troque tocando no seu avatar.',
+    color: C.green,
   },
   {
     icon:  '🚀',

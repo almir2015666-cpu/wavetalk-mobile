@@ -97,6 +97,7 @@ export default function MainScreen({ myName, myChannel: initChannel, myPin, myCh
   type UserStatus = 'available' | 'busy' | 'silent';
   const [myStatus,      setMyStatus]     = useState<UserStatus>('available');
   const [statusModal,   setStatusModal]  = useState(false);
+  const myStatusRef = useRef<UserStatus>('available');
 
   const bannerAnim = useRef(new Animated.Value(0)).current;
   const myId       = useRef('');
@@ -191,6 +192,8 @@ export default function MainScreen({ myName, myChannel: initChannel, myPin, myCh
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
     },
     onAudioRecv:  (data, from, name) => {
+      // Block incoming audio when busy
+      if (myStatusRef.current === 'busy') return;
       // Stronger haptic for incoming audio — distinct from UI taps
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
       notifyIncoming(name);
@@ -285,6 +288,7 @@ export default function MainScreen({ myName, myChannel: initChannel, myPin, myCh
   } as const;
 
   const changeStatus = (s: UserStatus) => {
+    myStatusRef.current = s;
     setMyStatus(s);
     setStatus(s);
     setStatusModal(false);
