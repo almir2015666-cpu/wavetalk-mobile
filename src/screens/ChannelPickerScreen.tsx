@@ -154,58 +154,8 @@ export default function ChannelPickerScreen({ myName, onJoin, onBack }: Props) {
           <Text style={s.greetSub}>Escolha um canal para entrar ou crie o seu</Text>
         </View>
 
-        {/* Section label */}
-        <Text style={s.sectionLabel}>CANAIS ATIVOS</Text>
-
-        {loading ? (
-          <ActivityIndicator color={C.cyan} style={{ marginTop: 32 }} />
-        ) : (
-          channels.map(ch => {
-            const isJoining = joining === ch.name;
-            const isFull    = ch.isFull || ch.online >= CHANNEL_MAX;
-            return (
-              <TouchableOpacity
-                key={ch.name}
-                style={[s.chCard, isJoining && s.chCardActive, isFull && s.chCardFull]}
-                onPress={() => handleJoin(ch)}
-                activeOpacity={isFull ? 1 : 0.75}
-              >
-                <View style={s.chIcon}>
-                  <Text style={{ fontSize: 26 }}>{ICONS[ch.name] ?? '🔊'}</Text>
-                </View>
-
-                <View style={s.chInfo}>
-                  <Text style={s.chName}># {ch.name}</Text>
-                  <Text style={[s.chMeta, isFull && { color: C.red }]}>
-                    {isFull
-                      ? `Lotado (${ch.online}/${CHANNEL_MAX})`
-                      : ch.online === 0
-                      ? 'Vazio · Entre primeiro'
-                      : `${ch.online}/${CHANNEL_MAX} online`}
-                    {!isFull && ch.talking ? ' · 🎙' : ''}
-                  </Text>
-                </View>
-
-                <View style={s.chRight}>
-                  {ch.hasPin && !isFull && <Text style={{ fontSize: 13 }}>🔒</Text>}
-                  {isFull
-                    ? <Text style={{ fontSize: 16 }}>🚫</Text>
-                    : ch.online > 0
-                    ? (
-                      <View style={[s.onlineBadge, { backgroundColor: ch.talking ? C.green : C.cyan }]}>
-                        <Text style={s.onlineBadgeText}>{ch.online}</Text>
-                      </View>
-                    ) : null
-                  }
-                  {!isFull && <Text style={s.arrow}>{isJoining ? '…' : '→'}</Text>}
-                </View>
-              </TouchableOpacity>
-            );
-          })
-        )}
-
-        {/* Create new channel */}
-        <Text style={[s.sectionLabel, { marginTop: 28 }]}>CRIAR CANAL PRIVADO</Text>
+        {/* Create new channel — above the channel list */}
+        <Text style={s.sectionLabel}>CRIAR CANAL PRIVADO</Text>
 
         <View style={s.createCard}>
           <TextInput
@@ -265,6 +215,56 @@ export default function ChannelPickerScreen({ myName, onJoin, onBack }: Props) {
             O canal desaparece automaticamente quando todos saem
           </Text>
         </View>
+
+        {/* Section label */}
+        <Text style={[s.sectionLabel, { marginTop: 28 }]}>CANAIS ATIVOS</Text>
+
+        {loading ? (
+          <ActivityIndicator color={C.cyan} style={{ marginTop: 32 }} />
+        ) : (
+          channels.map(ch => {
+            const isJoining = joining === ch.name;
+            const isFull    = ch.isFull || ch.online >= CHANNEL_MAX;
+            return (
+              <TouchableOpacity
+                key={ch.name}
+                style={[s.chCard, isJoining && s.chCardActive, isFull && s.chCardFull]}
+                onPress={() => handleJoin(ch)}
+                activeOpacity={isFull ? 1 : 0.75}
+              >
+                <View style={s.chIcon}>
+                  <Text style={{ fontSize: 26 }}>{ICONS[ch.name] ?? '🔊'}</Text>
+                </View>
+
+                <View style={s.chInfo}>
+                  <Text style={s.chName}># {ch.name}</Text>
+                  <Text style={[s.chMeta, isFull && { color: C.red }]}>
+                    {isFull
+                      ? `Lotado (${ch.online}/${CHANNEL_MAX})`
+                      : ch.online === 0
+                      ? 'Vazio · Entre primeiro'
+                      : `${ch.online}/${CHANNEL_MAX} online`}
+                    {!isFull && ch.talking ? ' · 🎙' : ''}
+                  </Text>
+                </View>
+
+                <View style={s.chRight}>
+                  {ch.hasPin && !isFull && <Text style={{ fontSize: 13 }}>🔒</Text>}
+                  {isFull
+                    ? <Text style={{ fontSize: 16 }}>🚫</Text>
+                    : ch.online > 0
+                    ? (
+                      <View style={[s.onlineBadge, { backgroundColor: ch.talking ? C.green : C.cyan }]}>
+                        <Text style={s.onlineBadgeText}>{ch.online}</Text>
+                      </View>
+                    ) : null
+                  }
+                  {!isFull && <Text style={s.arrow}>{isJoining ? '…' : '→'}</Text>}
+                </View>
+              </TouchableOpacity>
+            );
+          })
+        )}
       </Animated.ScrollView>
 
       {/* ── PIN Prompt Modal ── */}

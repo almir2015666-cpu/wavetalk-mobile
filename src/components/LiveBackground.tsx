@@ -24,7 +24,6 @@ function Blob({ color, size, fromX, fromY, toX, toY, dur, delay, opacity }: Blob
   useEffect(() => {
     const move = Animated.loop(
       Animated.sequence([
-        Animated.delay(delay),
         Animated.parallel([
           Animated.timing(x, { toValue: toX - size / 2, duration: dur, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
           Animated.timing(y, { toValue: toY - size / 2, duration: dur, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
@@ -38,15 +37,13 @@ function Blob({ color, size, fromX, fromY, toX, toY, dur, delay, opacity }: Blob
 
     const breathe = Animated.loop(
       Animated.sequence([
-        Animated.timing(sc, { toValue: 1.25, duration: dur * 0.45, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
-        Animated.timing(sc, { toValue: 0.80, duration: dur * 0.45, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
-        Animated.timing(sc, { toValue: 0.90, duration: dur * 0.10, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+        Animated.timing(sc, { toValue: 1.20, duration: dur * 0.50, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+        Animated.timing(sc, { toValue: 0.85, duration: dur * 0.50, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
       ])
     );
 
-    move.start();
-    breathe.start();
-    return () => { move.stop(); breathe.stop(); };
+    const t = setTimeout(() => { move.start(); breathe.start(); }, delay);
+    return () => { clearTimeout(t); move.stop(); breathe.stop(); };
   }, []);
 
   return (
