@@ -32,18 +32,25 @@ workflows:
       - name: Install CocoaPods
         script: cd ios && pod install
 
-      - name: Fix Swift 6 compatibility for pods
-        script: |
-          ruby -e '
-            Dir.glob("ios/Pods/Target Support Files/**/*.xcconfig") do |f|
-              content = File.read(f)
-              next if content.include?("SWIFT_STRICT_CONCURRENCY")
-              File.write(f, content + "\nSWIFT_STRICT_CONCURRENCY = minimal\n")
-            end
-          '
-
       - name: Remove push notification entitlement
         script: /usr/libexec/PlistBuddy -c "Delete :aps-environment" ios/WaveTalk/WaveTalk.entitlements 2>/dev/null || true
+
+      - name: Create ExportOptions.plist
+        script: |
+          python3 -c "
+          import plistlib, os
+          data = {
+              'method': 'app-store-connect',
+              'teamID': os.environ.get('APPLE_TEAM_ID', '66U94U6Q5H'),
+              'signingStyle': 'manual',
+              'provisioningProfiles': {'com.wavetalk.app': 'wavetalk-appstore'},
+              'uploadBitcode': False,
+              'uploadSymbols': True,
+              'compileBitcode': False
+          }
+          with open('ios/ExportOptions.plist', 'wb') as f:
+              plistlib.dump(data, f, fmt=plistlib.FMT_XML)
+          "
 
       - name: Set up keychain
         script: keychain initialize
@@ -59,15 +66,30 @@ workflows:
       - name: Build number
         script: cd ios && agvtool new-version -all $(date +%s)
 
-      - name: Build IPA
+      - name: Archive
         script: |
-          xcode-project build-ipa \
-            --workspace "$XCODE_WORKSPACE" \
-            --scheme "$XCODE_SCHEME" \
-          || { echo "=== XCODEBUILD LOG ==="; cat /tmp/xcodebuild_logs/*.log 2>/dev/null || echo "Log not found"; exit 1; }
+          xcodebuild \
+            -workspace "$XCODE_WORKSPACE" \
+            -scheme "$XCODE_SCHEME" \
+            -configuration Release \
+            -archivePath build/WaveTalk.xcarchive \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            SWIFT_STRICT_CONCURRENCY=minimal \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="Apple Distribution" \
+            PROVISIONING_PROFILE_SPECIFIER=wavetalk-appstore \
+            DEVELOPMENT_TEAM="${APPLE_TEAM_ID}" \
+            archive
+
+      - name: Export IPA
+        script: |
+          xcodebuild -exportArchive \
+            -archivePath build/WaveTalk.xcarchive \
+            -exportOptionsPlist ios/ExportOptions.plist \
+            -exportPath build/
 
     artifacts:
-      - build/ios/ipa/*.ipa
+      - build/*.ipa
       - /tmp/xcodebuild_logs/*.log
 
     publishing:
