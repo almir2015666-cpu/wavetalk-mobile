@@ -108,6 +108,48 @@ workflows:
                   '@end',
           })
 
+          # ── EXAV.m ────────────────────────────────────────────────────────────
+          # Several service/delegate headers were removed from XCFramework in Expo 56.
+          # EXUIManager.h, EXFileSystemInterface.h, EXPermissionsInterface.h are still
+          # present (verified: not in the failure list). The others below are missing.
+          # Stubs provide only the method signatures actually called in EXAV.m;
+          # implementations stay in the XCFramework binary.
+          print('Patching EXAV.m ...')
+          patch_file('node_modules/expo-av/ios/EXAV/EXAV.m', {
+              '#import <ExpoModulesCore/EXEventEmitterService.h>':
+                  '/* EXEventEmitterService stub (Expo 56: not in XCFramework) */\n'
+                  '@protocol EXEventEmitterService <NSObject>\n'
+                  '- (void)sendEventWithName:(NSString *)name body:(id)body;\n'
+                  '@end',
+
+              '#import <ExpoModulesCore/EXAppLifecycleService.h>':
+                  '/* EXAppLifecycleService stub (Expo 56: not in XCFramework) */\n'
+                  '@protocol EXAppLifecycleService <NSObject>\n'
+                  '- (void)registerAppLifecycleListener:(id)listener;\n'
+                  '- (void)unregisterAppLifecycleListener:(id)listener;\n'
+                  '@end',
+
+              '#import <ExpoModulesCore/EXPermissionsMethodsDelegate.h>':
+                  '/* EXPermissionsMethodsDelegate stub (Expo 56: not in XCFramework public headers) */\n'
+                  '@interface EXPermissionsMethodsDelegate : NSObject\n'
+                  '+ (void)registerRequesters:(NSArray *)requesters withPermissionsManager:(id)permissionsManager;\n'
+                  '+ (void)getPermissionWithPermissionsManager:(id)permissionsManager\n'
+                  '                              withRequester:(Class)requesterClass\n'
+                  '                                    resolve:(EXPromiseResolveBlock)resolve\n'
+                  '                                     reject:(EXPromiseRejectBlock)reject;\n'
+                  '+ (void)askForPermissionWithPermissionsManager:(id)permissionsManager\n'
+                  '                                 withRequester:(Class)requesterClass\n'
+                  '                                       resolve:(EXPromiseResolveBlock)resolve\n'
+                  '                                        reject:(EXPromiseRejectBlock)reject;\n'
+                  '@end',
+
+              '#import <ExpoModulesCore/EXJavaScriptContextProvider.h>':
+                  '/* EXJavaScriptContextProvider stub (Expo 56: not in XCFramework) */\n'
+                  '@protocol EXJavaScriptContextProvider <NSObject>\n'
+                  '- (void *)javaScriptRuntimePointer;\n'
+                  '@end',
+          })
+
           print('expo-av patches done.')
           PYEOF
 
