@@ -6,11 +6,13 @@ workflows:
     integrations:
       app_store_connect: appstore_codemagic_admin
     environment:
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.wavetalk.app
       node: 22
       groups:
         - wavetalk
       vars:
-        BUNDLE_ID: "com.wavetalk.app"
         XCODE_WORKSPACE: "ios/WaveTalk.xcworkspace"
         XCODE_SCHEME: "WaveTalk"
     triggering:
@@ -31,16 +33,9 @@ workflows:
           python3 - << 'PYEOF'
           import os
 
-          # expo-av@16.x uses several <ExpoModulesCore/...> headers that Expo 56
-          # no longer exposes in the prebuilt XCFramework. The compiler resolves
-          # <Framework/H.h> via -F framework paths pointing to XCFrameworkIntermediates,
-          # which are created during the build (after ScanDependencies runs). Any
-          # build-phase-level patches arrive too late. The fix is to patch the source
-          # files directly so the imports never hit the -F path at all.
-
           def patch_file(path, replacements):
               if not os.path.exists(path):
-                  print(f'{path} not found — skip')
+                  print(f'{path} not found - skip')
                   return
               with open(path) as f:
                   content = f.read()
@@ -56,11 +51,12 @@ workflows:
                   with open(path, 'w') as f:
                       f.write(content)
 
-          # ── EXAV.h ────────────────────────────────────────────────────────────
+          # EXAV.h: EXEventEmitter.h removed from XCFramework public headers.
+          # NOT in PCM either (confirmed: EXAV.m compiles fine with this stub).
           print('Patching EXAV.h ...')
           patch_file('node_modules/expo-av/ios/EXAV/EXAV.h', {
               '#import <ExpoModulesCore/EXEventEmitter.h>':
-                  '/* EXEventEmitter stub (Expo 56: not in XCFramework) */\n'
+                  '/* EXEventEmitter stub: removed from Expo 56 XCFramework */\n'
                   '@protocol EXEventEmitter <NSObject>\n'
                   '- (NSArray<NSString *> *)supportedEvents;\n'
                   '- (void)startObserving;\n'
@@ -68,41 +64,34 @@ workflows:
                   '@end',
           })
 
-          # ── EXVideoView.h ─────────────────────────────────────────────────────
-          # EXModuleRegistry and EXLegacyExpoViewProtocol are not in the Expo 56
-          # XCFramework public Headers/ (import fails at ScanDependencies).
-          # EXModuleRegistry IS still in the ExpoModulesCore PCM (exported via the
-          # umbrella header); using a forward declaration avoids the redefinition
-          # error while still allowing pointer types and method calls (the full
-          # definition arrives from the PCM when ExpoModulesCore loads via EXAV.h).
-          # EXLegacyExpoViewProtocol is NOT in the PCM (removed entirely), so it
-          # needs a full inline protocol stub for the conformance declaration.
+          # EXVideoView.h: two headers missing from XCFramework public Headers/.
+          # EXModuleRegistry IS in the ExpoModulesCore PCM (umbrella header exports it).
+          # Using @class forward declaration avoids redefinition -- the PCM supplies
+          # the full definition when ExpoModulesCore loads via EXModuleRegistryConsumer.h.
+          # EXLegacyExpoViewProtocol is NOT in the PCM (completely removed), so it
+          # needs a full inline stub for the protocol conformance declaration.
           print('Patching EXVideoView.h ...')
           patch_file('node_modules/expo-av/ios/EXAV/Video/EXVideoView.h', {
               '#import <ExpoModulesCore/EXModuleRegistry.h>':
-                  '/* EXModuleRegistry: forward-declare only — full definition comes from '
-                  'ExpoModulesCore PCM (loaded via EXModuleRegistryConsumer.h in EXAV.h). '
-                  'Expo 56 removed this header from XCFramework public Headers/. */\n'
+                  '/* EXModuleRegistry: forward-declare only; PCM provides full def */\n'
                   '@class EXModuleRegistry;',
 
               '#import <ExpoModulesCore/EXLegacyExpoViewProtocol.h>':
-                  '/* EXLegacyExpoViewProtocol stub (Expo 56: removed entirely from PCM) */\n'
+                  '/* EXLegacyExpoViewProtocol stub: removed from Expo 56 PCM */\n'
                   '@protocol EXLegacyExpoViewProtocol <NSObject>\n'
                   '@optional\n'
                   '@end',
           })
 
-          # ── EXVideoView.m ─────────────────────────────────────────────────────
-          # EXUtilities IS in the ExpoModulesCore PCM (confirmed: its @interface stub
-          # caused a redefinition error).  Remove the @interface stub entirely and let
-          # the PCM supply the full definition.  EX_WEAKIFY / EX_ENSURE_STRONGIFY are
-          # defined in EXDefines.h (which IS in the XCFramework); guard with #ifndef
-          # so we only define them if they haven't arrived through the PCM yet.
+          # EXVideoView.m: EXUtilities IS in the ExpoModulesCore PCM.
+          # Removing the @interface stub avoids the redefinition error;
+          # PCM supplies performSynchronouslyOnMainThread: when ExpoModulesCore loads.
+          # EX_WEAKIFY / EX_ENSURE_STRONGIFY are in EXDefines.h (still in XCFramework),
+          # guarded with #ifndef so they are no-ops if already defined via the PCM.
           print('Patching EXVideoView.m ...')
           patch_file('node_modules/expo-av/ios/EXAV/Video/EXVideoView.m', {
               '#import <ExpoModulesCore/EXUtilities.h>':
-                  '/* EXUtilities: header absent from XCFramework public Headers/ but the '
-                  'class IS in the PCM — no @interface stub needed; PCM provides it. */\n'
+                  '/* EXUtilities: in PCM; no @interface stub needed */\n'
                   '#ifndef EX_WEAKIFY\n'
                   '#define EX_WEAKIFY(var) __weak typeof(var) weak_##var = var;\n'
                   '#endif\n'
@@ -111,29 +100,25 @@ workflows:
                   '#endif',
           })
 
-          # ── EXAV.m ────────────────────────────────────────────────────────────
-          # Several service/delegate headers were removed from XCFramework in Expo 56.
-          # EXUIManager.h, EXFileSystemInterface.h, EXPermissionsInterface.h are still
-          # present (verified: not in the failure list). The others below are missing.
-          # Stubs provide only the method signatures actually called in EXAV.m;
-          # implementations stay in the XCFramework binary.
+          # EXAV.m: four service/delegate headers removed from Expo 56 XCFramework.
+          # These are NOT in the PCM either (confirmed: EXAV.m compiles fine with stubs).
           print('Patching EXAV.m ...')
           patch_file('node_modules/expo-av/ios/EXAV/EXAV.m', {
               '#import <ExpoModulesCore/EXEventEmitterService.h>':
-                  '/* EXEventEmitterService stub (Expo 56: not in XCFramework) */\n'
+                  '/* EXEventEmitterService stub: removed from Expo 56 XCFramework */\n'
                   '@protocol EXEventEmitterService <NSObject>\n'
                   '- (void)sendEventWithName:(NSString *)name body:(id)body;\n'
                   '@end',
 
               '#import <ExpoModulesCore/EXAppLifecycleService.h>':
-                  '/* EXAppLifecycleService stub (Expo 56: not in XCFramework) */\n'
+                  '/* EXAppLifecycleService stub: removed from Expo 56 XCFramework */\n'
                   '@protocol EXAppLifecycleService <NSObject>\n'
                   '- (void)registerAppLifecycleListener:(id)listener;\n'
                   '- (void)unregisterAppLifecycleListener:(id)listener;\n'
                   '@end',
 
               '#import <ExpoModulesCore/EXPermissionsMethodsDelegate.h>':
-                  '/* EXPermissionsMethodsDelegate stub (Expo 56: not in XCFramework public headers) */\n'
+                  '/* EXPermissionsMethodsDelegate stub: removed from Expo 56 XCFramework */\n'
                   '@interface EXPermissionsMethodsDelegate : NSObject\n'
                   '+ (void)registerRequesters:(NSArray *)requesters withPermissionsManager:(id)permissionsManager;\n'
                   '+ (void)getPermissionWithPermissionsManager:(id)permissionsManager\n'
@@ -147,7 +132,7 @@ workflows:
                   '@end',
 
               '#import <ExpoModulesCore/EXJavaScriptContextProvider.h>':
-                  '/* EXJavaScriptContextProvider stub (Expo 56: not in XCFramework) */\n'
+                  '/* EXJavaScriptContextProvider stub: removed from Expo 56 XCFramework */\n'
                   '@protocol EXJavaScriptContextProvider <NSObject>\n'
                   '- (void *)javaScriptRuntimePointer;\n'
                   '@end',
@@ -169,14 +154,6 @@ workflows:
           project = Xcodeproj::Project.open('ios/Pods/Pods.xcodeproj')
 
           project.targets.each do |target|
-            # EXAV: disable Clang explicit modules and exclude video files.
-            # Xcode 26 explicit modules require each PCM to be listed in the cc1
-            # command. EXVideoPlayerViewController.m only receives AVKit PCM but
-            # AVKit transitively needs AVFoundation — without it the build fails.
-            # Disabling explicit modules lets the compiler resolve everything via
-            # implicit module loading, which handles cross-framework dependencies
-            # automatically. This also avoids PCM conflicts with our inline ObjC
-            # stubs for removed ExpoModulesCore headers.
             if target.name == 'EXAV'
               target.build_configurations.each do |config|
                 config.build_settings['EXCLUDED_SOURCE_FILE_NAMES'] = 'ExpoVideoView.swift VideoViewModule.swift'
@@ -185,9 +162,6 @@ workflows:
               puts 'EXAV: excluded video Swift files, disabled explicit modules'
             end
 
-            # ExpoTaskManager: expo-task-manager 14.x uses legacy RCT bridge APIs.
-            # RN 0.85.3 defines RCT_REMOVE_LEGACY_ARCH=1 which removes those APIs.
-            # Override to 0 so the legacy ObjC code compiles.
             if target.name == 'ExpoTaskManager'
               target.build_configurations.each do |config|
                 existing = Array(config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] || '$(inherited)')
@@ -209,10 +183,10 @@ workflows:
       - name: Create ExportOptions.plist
         script: |
           python3 -c "
-          import plistlib, os
+          import plistlib
           data = {
               'method': 'app-store-connect',
-              'teamID': os.environ.get('APPLE_TEAM_ID', '66U94U6Q5H'),
+              'teamID': '66U94U6Q5H',
               'signingStyle': 'manual',
               'provisioningProfiles': {'com.wavetalk.app': 'wavetalk-appstore'},
               'uploadBitcode': False,
@@ -226,13 +200,11 @@ workflows:
       - name: Set up keychain
         script: keychain initialize
 
-      - name: Fetch signing files
-        script: |
-          app-store-connect fetch-signing-files "$BUNDLE_ID" \
-            --type IOS_APP_STORE \
-            --create
-          keychain add-certificates
-          xcode-project use-profiles
+      - name: Add certificates to keychain
+        script: keychain add-certificates
+
+      - name: Set up code signing
+        script: xcode-project use-profiles
 
       - name: Build number
         script: cd ios && agvtool new-version -all $(date +%s)
@@ -242,20 +214,16 @@ workflows:
 
       - name: Archive
         script: |
-          set -o pipefail
-          mkdir -p /tmp/xcodebuild_logs
           xcodebuild \
             -workspace "$XCODE_WORKSPACE" \
             -scheme "$XCODE_SCHEME" \
             -configuration Release \
             -archivePath build/WaveTalk.xcarchive \
-            COMPILER_INDEX_STORE_ENABLE=NO \
-            SWIFT_STRICT_CONCURRENCY=minimal \
             CODE_SIGN_STYLE=Manual \
             CODE_SIGN_IDENTITY="Apple Distribution" \
-            PROVISIONING_PROFILE_SPECIFIER=wavetalk-appstore \
-            DEVELOPMENT_TEAM="${APPLE_TEAM_ID}" \
-            archive 2>&1 | tee /tmp/xcodebuild_logs/build.log
+            PROVISIONING_PROFILE_SPECIFIER="wavetalk-appstore" \
+            DEVELOPMENT_TEAM=66U94U6Q5H \
+            archive
 
       - name: Export IPA
         script: |
@@ -266,7 +234,6 @@ workflows:
 
     artifacts:
       - build/*.ipa
-      - /tmp/xcodebuild_logs/*.log
 
     publishing:
       app_store_connect:
