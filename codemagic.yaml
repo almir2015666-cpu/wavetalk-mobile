@@ -3,64 +3,80 @@ workflows:
     name: WaveTalk iOS TestFlight
     max_build_duration: 60
     instance_type: mac_mini_m2
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: main
+          include: true
     integrations:
       app_store_connect: appstore_codemagic_admin
     environment:
       xcode: 26.4
       node: 22
       groups:
-        - wavetalk
+        - ios_signing
       vars:
-        XCODE_WORKSPACE: ios/WaveTalk.xcworkspace
-        XCODE_SCHEME: WaveTalk
-    triggering:
-      events:
-        - push
-      branch_patterns:
-        - pattern: main
+        BUNDLE_ID: "com.wavetalk.app"
+        XCODE_WORKSPACE: "ios/WaveTalk.xcworkspace"
+        XCODE_SCHEME: "WaveTalk"
     scripts:
-      - name: Install dependencies
+      - name: Instalar dependências
         script: npm install --legacy-peer-deps
+
       - name: Prebuild iOS
         script: npx expo prebuild --platform ios --clean
 
-      - name: Install CocoaPods
+      - name: Instalar CocoaPods
         script: |
           cd ios
           pod install
 
-      - name: Patch xcconfigs — Xcode 26 C++ compatibility
+      - name: Patch C++ — Xcode 26 compatibility (xcconfig + pbxproj)
         script: |
-          echo "Patching xcconfig files: c++20 → c++17"
+          echo "=== Patching xcconfig files ==="
           find ios/Pods -name "*.xcconfig" \
             -exec sed -i '' 's/CLANG_CXX_LANGUAGE_STANDARD = c++20/CLANG_CXX_LANGUAGE_STANDARD = c++17/g' {} \;
-          echo "Done. Patched files:"
-          find ios/Pods -name "*.xcconfig" | xargs grep -l "CLANG_CXX_LANGUAGE_STANDARD" | head -20
-      - name: Set build number
-        script: |
-          cd ios
-          agvtool new-version -all $BUILD_NUMBER
-      - name: Remove push notification entitlement
+
+          echo "=== Patching Pods.xcodeproj/project.pbxproj ==="
+          sed -i '' \
+            's/CLANG_CXX_LANGUAGE_STANDARD = "c++20"/CLANG_CXX_LANGUAGE_STANDARD = "c++17"/g' \
+            ios/Pods/Pods.xcodeproj/project.pbxproj
+          sed -i '' \
+            's/CLANG_CXX_LANGUAGE_STANDARD = c++20/CLANG_CXX_LANGUAGE_STANDARD = c++17/g' \
+            ios/Pods/Pods.xcodeproj/project.pbxproj
+
+          echo "=== Result ==="
+          grep -r "CLANG_CXX_LANGUAGE_STANDARD" ios/Pods --include="*.xcconfig" --include="*.pbxproj" | grep "c++20" | wc -l | xargs echo "Remaining c++20 occurrences:"
+
+      - name: Remover push notification entitlement
         script: |
           /usr/libexec/PlistBuddy -c "Delete :aps-environment" ios/WaveTalk/WaveTalk.entitlements 2>/dev/null || true
-      - name: Set up code signing
+
+      - name: Criar/buscar certificado e perfil de distribuição
         script: |
           keychain initialize
-          export APP_STORE_CONNECT_KEY_IDENTIFIER="$APP_STORE_CONNECT_KEY_ID"
-          export APP_STORE_CONNECT_PRIVATE_KEY="$APP_STORE_CONNECT_API_KEY"
-          app-store-connect fetch-signing-files com.wavetalk.app \
-            --type IOS_APP_STORE \
-            --create
+          app-store-connect fetch-signing-files "$BUNDLE_ID" --type IOS_APP_STORE --create
           keychain add-certificates
-      - name: Configure Xcode signing
+
+      - name: Configurar assinatura automática
         script: xcode-project use-profiles
-      - name: Build IPA
+
+      - name: Definir número de build único
+        script: |
+          cd ios
+          agvtool new-version -all $(date +%s)
+
+      - name: Gerar .ipa assinado
         script: |
           xcode-project build-ipa \
             --workspace "$XCODE_WORKSPACE" \
             --scheme "$XCODE_SCHEME"
+
     artifacts:
       - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+
     publishing:
       app_store_connect:
         auth: integration
