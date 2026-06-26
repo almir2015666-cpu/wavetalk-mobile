@@ -98,12 +98,20 @@ workflows:
                   'extern void EXFatal(NSError *);',
           })
 
-          # EXAV.m: four service/delegate headers removed from Expo 56 XCFramework.
-          # These are NOT in the PCM either (confirmed: EXAV.m compiles fine with stubs).
+          # EXAV.m: EXEventEmitterService, EXAppLifecycleService, EXPermissionsMethodsDelegate,
+          # and EXJavaScriptContextProvider ARE in the Expo 56 XCFramework public Headers/
+          # (confirmed: Build 14 showed "different definitions" ODR errors when our stubs
+          # conflicted with the PCM definitions for these types). Keep original imports --
+          # the XCFramework headers are in the CocoaPods cache and resolve correctly.
+          #
           # EXAV-Swift.h: generated from ExpoVideoView.swift/VideoViewModule.swift which are
           # excluded via EXCLUDED_SOURCE_FILE_NAMES; replace the conditional #import block
           # with a forward declaration so [ExpoVideoView class] compiles (returns nil at runtime,
           # harmless since WaveTalk does not use video).
+          #
+          # EXFatal/EXErrorWithMessage: declared in EXDefines.h npm source but absent from
+          # the XCFramework PCM. Add extern declarations so EXAV.m compiles without
+          # -Wimplicit-function-declaration errors (multiple call sites: lines 287-380).
           print('Patching EXAV.m ...')
           patch_file('node_modules/expo-av/ios/EXAV/EXAV.m', {
               '#if __has_include(<EXAV/EXAV-Swift.h>)\n'
@@ -112,40 +120,10 @@ workflows:
               '#import "EXAV-Swift.h"\n'
               '#endif':
                   '/* EXAV-Swift.h: Swift video files excluded via EXCLUDED_SOURCE_FILE_NAMES */\n'
-                  '@class ExpoVideoView;',
-
-              '#import <ExpoModulesCore/EXEventEmitterService.h>':
-                  '/* EXEventEmitterService stub: removed from Expo 56 XCFramework */\n'
-                  '@protocol EXEventEmitterService <NSObject>\n'
-                  '- (void)sendEventWithName:(NSString *)name body:(id)body;\n'
-                  '@end',
-
-              '#import <ExpoModulesCore/EXAppLifecycleService.h>':
-                  '/* EXAppLifecycleService stub: removed from Expo 56 XCFramework */\n'
-                  '@protocol EXAppLifecycleService <NSObject>\n'
-                  '- (void)registerAppLifecycleListener:(id)listener;\n'
-                  '- (void)unregisterAppLifecycleListener:(id)listener;\n'
-                  '@end',
-
-              '#import <ExpoModulesCore/EXPermissionsMethodsDelegate.h>':
-                  '/* EXPermissionsMethodsDelegate stub: removed from Expo 56 XCFramework */\n'
-                  '@interface EXPermissionsMethodsDelegate : NSObject\n'
-                  '+ (void)registerRequesters:(NSArray *)requesters withPermissionsManager:(id)permissionsManager;\n'
-                  '+ (void)getPermissionWithPermissionsManager:(id)permissionsManager\n'
-                  '                              withRequester:(Class)requesterClass\n'
-                  '                                    resolve:(EXPromiseResolveBlock)resolve\n'
-                  '                                     reject:(EXPromiseRejectBlock)reject;\n'
-                  '+ (void)askForPermissionWithPermissionsManager:(id)permissionsManager\n'
-                  '                                 withRequester:(Class)requesterClass\n'
-                  '                                       resolve:(EXPromiseResolveBlock)resolve\n'
-                  '                                        reject:(EXPromiseRejectBlock)reject;\n'
-                  '@end',
-
-              '#import <ExpoModulesCore/EXJavaScriptContextProvider.h>':
-                  '/* EXJavaScriptContextProvider stub: removed from Expo 56 XCFramework */\n'
-                  '@protocol EXJavaScriptContextProvider <NSObject>\n'
-                  '- (void *)javaScriptRuntimePointer;\n'
-                  '@end',
+                  '@class ExpoVideoView;\n'
+                  '/* EXFatal/EXErrorWithMessage: absent from Expo 56 XCFramework PCM */\n'
+                  'extern NSError *EXErrorWithMessage(NSString *);\n'
+                  'extern void EXFatal(NSError *);',
           })
 
           print('expo-av patches done.')
