@@ -4,7 +4,7 @@ import { SERVER_URL } from '../config';
 
 export { SERVER_URL };
 
-export type User = { id: string; name: string; channel: string; talking: boolean };
+export type User = { id: string; name: string; channel: string; talking: boolean; status?: string };
 
 export interface SocketCallbacks {
   onJoined:        (users: User[], existingPeers: {id:string;name:string}[]) => void;
@@ -68,6 +68,7 @@ export function useSocket(callbacks: SocketCallbacks) {
   const pttStop   = useCallback(() => socketRef.current?.emit('ptt:stop'),  []);
   const sendAudio = useCallback((data: string) => socketRef.current?.emit('audio:send', { data }), []);
   const getId     = useCallback(() => socketRef.current?.id ?? '', []);
+  const setStatus = useCallback((status: string) => socketRef.current?.emit('status:set', status), []);
 
-  return { join, pttStart, pttStop, sendAudio, getId };
+  return { join, pttStart, pttStop, sendAudio, getId, setStatus };
 }

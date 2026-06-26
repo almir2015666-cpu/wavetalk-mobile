@@ -93,6 +93,11 @@ export default function MainScreen({ myName, myChannel: initChannel, myPin, myCh
   const [pinInput,      setPinInput]     = useState('');
   const [pinError,      setPinError]     = useState(false);
 
+  // User status
+  type UserStatus = 'available' | 'busy' | 'silent';
+  const [myStatus,      setMyStatus]     = useState<UserStatus>('available');
+  const [statusModal,   setStatusModal]  = useState(false);
+
   const bannerAnim = useRef(new Animated.Value(0)).current;
   const myId       = useRef('');
   const talkStart  = useRef(0);
@@ -141,7 +146,7 @@ export default function MainScreen({ myName, myChannel: initChannel, myPin, myCh
     setLog(prev => [{ id: String(Date.now()), name, duration, ts, audio: audioData }, ...prev].slice(0, 50));
   }, []);
 
-  const { join, pttStart, pttStop, sendAudio, getId } = useSocket({
+  const { join, pttStart, pttStop, sendAudio, getId, setStatus } = useSocket({
     onConnect: () => {
       setConnected(true); setReconnecting(false); setFullBanner(false);
       myId.current = getId();
@@ -273,6 +278,20 @@ export default function MainScreen({ myName, myChannel: initChannel, myPin, myCh
   }, [locked, talking, connected]);
 
   // Share channel
+  const STATUS_CONFIG = {
+    available: { label: 'Disponível', color: C.green,  icon: '●' },
+    busy:      { label: 'Ocupado',    color: C.red,    icon: '●' },
+    silent:    { label: 'Silencioso', color: C.text3,  icon: '🔇' },
+  } as const;
+
+  const changeStatus = (s: UserStatus) => {
+    setMyStatus(s);
+    setStatus(s);
+    setStatusModal(false);
+    if (s === 'silent') setMuted(true);
+    else if (myStatus === 'silent') setMuted(false);
+  };
+
   const shareChannel = useCallback(() => {
     Share.share({
       message: `Entre no canal "${channel}" no WaveTalk! Baixe o app e escolha o canal "${channel}" para falar comigo.`,
@@ -395,9 +414,12 @@ export default function MainScreen({ myName, myChannel: initChannel, myPin, myCh
           </Text>
         </View>
 
-        <LinearGradient colors={myColors} style={s.myAvatar}>
-          <Text style={s.myAvatarText}>{myInit}</Text>
-        </LinearGradient>
+        <TouchableOpacity onPress={() => setStatusModal(true)} activeOpacity={0.8} style={{ position: 'relative' }}>
+          <LinearGradient colors={myColors} style={s.myAvatar}>
+            <Text style={s.myAvatarText}>{myInit}</Text>
+          </LinearGradient>
+          <View style={[s.statusDot, { backgroundColor: STATUS_CONFIG[myStatus].color }]} />
+        </TouchableOpacity>
       </View>
 
       {/* ── FULL CHANNEL BANNER ── */}
@@ -440,13 +462,18 @@ export default function MainScreen({ myName, myChannel: initChannel, myPin, myCh
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.usersRow}>
           {users.map(u => {
             const [c1, c2] = avatarColor(u.name);
-            const isMe     = u.id === myId.current;
-            const isTalker = u.id === talkerId;
+            const isMe      = u.id === myId.current;
+            const isTalker  = u.id === talkerId;
+            const uStatus   = (isMe ? myStatus : (u.status ?? 'available')) as UserStatus;
+            const sCfg      = STATUS_CONFIG[uStatus];
             return (
               <View key={u.id} style={[s.userPill, isMe && s.userPillMe, isTalker && s.userPillTalker]}>
-                <LinearGradient colors={[c1, c2]} style={s.pillAvatar}>
-                  <Text style={s.pillAvatarText}>{u.name[0]?.toUpperCase()}</Text>
-                </LinearGradient>
+                <View style={{ position: 'relative' }}>
+                  <LinearGradient colors={[c1, c2]} style={s.pillAvatar}>
+                    <Text style={s.pillAvatarText}>{u.name[0]?.toUpperCase()}</Text>
+                  </LinearGradient>
+                  <View style={[s.pillStatusDot, { backgroundColor: sCfg.color }]} />
+                </View>
                 <Text style={s.pillName} numberOfLines={1}>{isMe ? 'Você' : u.name.split(' ')[0]}</Text>
                 {isTalker && <Text style={s.pillMic}>🎙</Text>}
                 {isMe && muted && <Text style={s.pillMic}>🔇</Text>}
@@ -709,6 +736,31 @@ export default function MainScreen({ myName, myChannel: initChannel, myPin, myCh
         </KeyboardAvoidingView>
       </Modal>
 
+      {/* ── STATUS MODAL ── */}
+      <Modal visible={statusModal} transparent animationType="fade" onRequestClose={() => setStatusModal(false)}>
+        <TouchableOpacity style={s.statsOverlay} activeOpacity={1} onPress={() => setStatusModal(false)}>
+          <View style={[s.statsSheet, { paddingVertical: 20 }]}>
+            <Text style={[s.statsTitle, { marginBottom: 16 }]}>Meu status</Text>
+            {(['available', 'busy', 'silent'] as UserStatus[]).map(s2 => {
+              const cfg = STATUS_CONFIG[s2];
+              const isActive = myStatus === s2;
+              return (
+                <TouchableOpacity
+                  key={s2}
+                  style={[s.statusOption, isActive && s.statusOptionActive]}
+                  onPress={() => changeStatus(s2)}
+                  activeOpacity={0.75}
+                >
+                  <View style={[s.statusOptionDot, { backgroundColor: cfg.color }]} />
+                  <Text style={[s.statusOptionLabel, isActive && { color: C.text }]}>{cfg.label}</Text>
+                  {isActive && <Text style={{ marginLeft: 'auto', color: C.cyan, fontSize: 16 }}>✓</Text>}
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
       {/* ── SESSION STATS MODAL ── */}
       <Modal visible={statsOpen} transparent animationType="fade" onRequestClose={() => setStatsOpen(false)}>
         <View style={s.statsOverlay}>
@@ -956,4 +1008,24 @@ const s = StyleSheet.create({
   replayBtnLargeLabel:  { fontSize: 12, color: C.cyan, fontWeight: '700' },
   replayBtnNoAudio:     { paddingHorizontal: 10, paddingVertical: 10 },
   replayBtnNoAudioText: { fontSize: 11, color: C.text3 },
+
+  // Status
+  statusDot: {
+    position: 'absolute', bottom: 0, right: 0,
+    width: 10, height: 10, borderRadius: 5,
+    borderWidth: 2, borderColor: C.surface,
+  },
+  pillStatusDot: {
+    position: 'absolute', bottom: 0, right: 0,
+    width: 8, height: 8, borderRadius: 4,
+    borderWidth: 1.5, borderColor: C.surface,
+  },
+  statusOption: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    paddingHorizontal: 20, paddingVertical: 14,
+    borderRadius: 12, marginHorizontal: 4,
+  },
+  statusOptionActive: { backgroundColor: C.card },
+  statusOptionDot:    { width: 12, height: 12, borderRadius: 6 },
+  statusOptionLabel:  { fontSize: 16, color: C.text2, fontWeight: '600' },
 });

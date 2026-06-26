@@ -131,7 +131,7 @@ io.on('connection', (socket) => {
     const prev = users.get(socket.id);
     if (prev && prev.channel !== channelKey) leaveChannel(socket, prev.channel);
 
-    const user = { id: socket.id, name: userName, channel: channelKey, talking: false, talkStart: null };
+    const user = { id: socket.id, name: userName, channel: channelKey, talking: false, talkStart: null, status: 'available' };
     users.set(socket.id, user);
     channels.get(channelKey).add(socket.id);
     socket.join(channelKey);
@@ -165,6 +165,16 @@ io.on('connection', (socket) => {
   });
   socket.on('webrtc:ice', ({ to, candidate }) => {
     io.to(to).emit('webrtc:ice', { from: socket.id, candidate });
+  });
+
+  /* ── STATUS ── */
+  socket.on('status:set', (status) => {
+    const user = users.get(socket.id);
+    if (!user) return;
+    const allowed = ['available', 'busy', 'silent'];
+    if (!allowed.includes(status)) return;
+    user.status = status;
+    broadcastChannel(user.channel);
   });
 
   /* ── PTT START ── */
