@@ -114,6 +114,20 @@ workflows:
           # -Wimplicit-function-declaration errors (multiple call sites: lines 287-380).
           print('Patching EXAV.m ...')
           patch_file('node_modules/expo-av/ios/EXAV/EXAV.m', {
+              # EXEventEmitterService.h is NOT in the Expo 56 XCFramework public Headers/
+              # (Build 15: ScanDependencies failed at line 6 with "file not found").
+              # Provide a minimal stub that matches the actual protocol signature.
+              '#import <ExpoModulesCore/EXEventEmitterService.h>':
+                  '/* EXEventEmitterService: absent from Expo 56 XCFramework Headers */\n'
+                  '@protocol EXEventEmitterService\n'
+                  '- (void)sendEventWithName:(NSString *)name body:(id)body;\n'
+                  '@end',
+
+              # EXAV-Swift.h is never generated because ExpoVideoView.swift and
+              # VideoViewModule.swift are excluded via EXCLUDED_SOURCE_FILE_NAMES.
+              # Forward-declare ExpoVideoView so [ExpoVideoView class] compiles.
+              # Append EXFatal/EXErrorWithMessage externs here since EXDefines.h
+              # source declares them but they are absent from the XCFramework PCM.
               '#if __has_include(<EXAV/EXAV-Swift.h>)\n'
               '#import <EXAV/EXAV-Swift.h>\n'
               '#else\n'
