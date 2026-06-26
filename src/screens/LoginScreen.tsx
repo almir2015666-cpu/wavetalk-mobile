@@ -69,72 +69,78 @@ export default function LoginScreen({ onEnter, loading, savedName }: Props) {
       <KeyboardAvoidingView
         style={s.kav}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={0}
       >
-        {/* Logo area */}
-        <Animated.View style={[s.logoArea, { paddingTop: insets.top + 40, opacity: logoOp, transform: [{ translateY: logoY }] }]}>
-          <View style={{ alignItems: 'center', justifyContent: 'center' }}>
-            {/* Pulse ring 1 */}
-            <Animated.View style={[s.pulseRing, {
-              opacity:   pulse1.interpolate({ inputRange: [0, 0.3, 1], outputRange: [0, 0.55, 0] }),
-              transform: [{ scale: pulse1.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1.90] }) }],
-            }]} />
-            {/* Pulse ring 2 */}
-            <Animated.View style={[s.pulseRing, {
-              opacity:   pulse2.interpolate({ inputRange: [0, 0.3, 1], outputRange: [0, 0.55, 0] }),
-              transform: [{ scale: pulse2.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1.90] }) }],
-            }]} />
-            <View style={s.iconWrap}>
-              <MicSVG color={C.cyan} />
-            </View>
-          </View>
-          <Text style={s.appName}>WaveTalk</Text>
-          <Text style={s.tagline}>Fale agora. Seja ouvido.</Text>
-        </Animated.View>
+        <Animated.View style={[s.card, {
+          paddingBottom: insets.bottom + 24,
+          paddingTop:    insets.top + 24,
+          opacity: logoOp,
+          transform: [{ translateY: logoY }],
+        }]}>
 
-        {/* Form area */}
-        <Animated.View style={[s.formArea, { paddingBottom: insets.bottom + 32, opacity: formOp }]}>
-          <Text style={s.fieldLabel}>Como quer ser chamado?</Text>
-
-          <TextInput
-            style={s.input}
-            placeholder="Ex: José Costa"
-            placeholderTextColor={C.text3}
-            value={name}
-            onChangeText={setName}
-            maxLength={24}
-            autoCorrect={false}
-            autoCapitalize="words"
-            returnKeyType="go"
-            onSubmitEditing={() => canEnter && onEnter(name.trim())}
-            selectionColor={C.cyan}
-          />
-
-          <TouchableOpacity
-            style={[s.btnWrap, !canEnter && s.btnDisabled]}
-            onPress={() => canEnter && onEnter(name.trim())}
-            disabled={loading || !canEnter}
-            activeOpacity={0.82}
-          >
-            {canEnter ? (
-              <LinearGradient
-                colors={['#00d4ff', '#7c3aff']}
-                start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
-                style={s.btn}
-              >
-                {loading
-                  ? <ActivityIndicator color="#fff" />
-                  : <Text style={s.btnText}>Escolher canal  →</Text>
-                }
-              </LinearGradient>
-            ) : (
-              <View style={[s.btn, s.btnInactive]}>
-                <Text style={s.btnTextInactive}>Digite seu nome para continuar</Text>
+          {/* Mic + title */}
+          <View style={s.logoArea}>
+            <View style={{ alignItems: 'center', justifyContent: 'center' }}>
+              <Animated.View style={[s.pulseRing, {
+                opacity:   pulse1.interpolate({ inputRange: [0, 0.3, 1], outputRange: [0, 0.55, 0] }),
+                transform: [{ scale: pulse1.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1.90] }) }],
+              }]} />
+              <Animated.View style={[s.pulseRing, {
+                opacity:   pulse2.interpolate({ inputRange: [0, 0.3, 1], outputRange: [0, 0.55, 0] }),
+                transform: [{ scale: pulse2.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1.90] }) }],
+              }]} />
+              <View style={s.iconWrap}>
+                <MicSVG color={C.cyan} />
               </View>
-            )}
-          </TouchableOpacity>
+            </View>
+            <Text style={s.appName}>WaveTalk</Text>
+            <Text style={s.tagline}>Fale agora. Seja ouvido.</Text>
+          </View>
 
-          <Text style={s.hint}>Sem cadastro · Sem senha · Só falar</Text>
+          {/* Form */}
+          <Animated.View style={[s.formArea, { opacity: formOp }]}>
+            <Text style={s.fieldLabel}>Como quer ser chamado?</Text>
+
+            <TextInput
+              style={s.input}
+              placeholder="Ex: José Costa"
+              placeholderTextColor={C.text3}
+              value={name}
+              onChangeText={setName}
+              maxLength={24}
+              autoCorrect={false}
+              autoCapitalize="words"
+              returnKeyType="go"
+              onSubmitEditing={() => canEnter && onEnter(name.trim())}
+              selectionColor={C.cyan}
+            />
+
+            <TouchableOpacity
+              style={[s.btnWrap, !canEnter && s.btnDisabled]}
+              onPress={() => canEnter && onEnter(name.trim())}
+              disabled={loading || !canEnter}
+              activeOpacity={0.82}
+            >
+              {canEnter ? (
+                <LinearGradient
+                  colors={['#00d4ff', '#7c3aff']}
+                  start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+                  style={s.btn}
+                >
+                  {loading
+                    ? <ActivityIndicator color="#fff" />
+                    : <Text style={s.btnText}>Escolher canal  →</Text>
+                  }
+                </LinearGradient>
+              ) : (
+                <View style={[s.btn, s.btnInactive]}>
+                  <Text style={s.btnTextInactive}>Digite seu nome para continuar</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+
+            <Text style={s.hint}>Sem cadastro · Sem senha · Só falar</Text>
+          </Animated.View>
+
         </Animated.View>
       </KeyboardAvoidingView>
     </View>
@@ -158,7 +164,7 @@ function MicSVG({ color }: { color: string }) {
 
 const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: C.bg },
-  kav:  { flex: 1, justifyContent: 'space-between' },
+  kav:  { flex: 1, justifyContent: 'center' },
 
   glow1: {
     position: 'absolute', width: 360, height: 360, borderRadius: 180,
@@ -169,8 +175,11 @@ const s = StyleSheet.create({
     backgroundColor: C.purple, top: 60, alignSelf: 'center',
   },
 
+  card: {
+    paddingHorizontal: 28, gap: 36,
+  },
   logoArea: {
-    flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16, paddingHorizontal: 24,
+    alignItems: 'center', gap: 16,
   },
   pulseRing: {
     position: 'absolute',
@@ -187,7 +196,7 @@ const s = StyleSheet.create({
   appName: { fontSize: 40, fontWeight: '900', color: C.text, letterSpacing: -1.5 },
   tagline: { fontSize: 15, color: C.text2, letterSpacing: 0.2 },
 
-  formArea: { paddingHorizontal: 24, gap: 12 },
+  formArea: { gap: 12 },
   fieldLabel: {
     fontSize: 11, fontWeight: '700', color: C.text3,
     letterSpacing: 1.4, textTransform: 'uppercase',
