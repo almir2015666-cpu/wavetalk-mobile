@@ -81,26 +81,39 @@ workflows:
           })
 
           # EXVideoView.m: EXUtilities IS in the ExpoModulesCore PCM.
-          # Removing the @interface stub avoids the redefinition error;
-          # PCM supplies performSynchronouslyOnMainThread: when ExpoModulesCore loads.
-          # EX_WEAKIFY / EX_ENSURE_STRONGIFY are in EXDefines.h (still in XCFramework),
-          # guarded with #ifndef so they are no-ops if already defined via the PCM.
-          print('Patching EXVideoView.m ...')
-          patch_file('node_modules/expo-av/ios/EXAV/Video/EXVideoView.m', {
-              '#import <ExpoModulesCore/EXUtilities.h>':
-                  '/* EXUtilities: in PCM; no @interface stub needed */\n'
-                  '#ifndef EX_WEAKIFY\n'
-                  '#define EX_WEAKIFY(var) __weak typeof(var) weak_##var = var;\n'
-                  '#endif\n'
-                  '#ifndef EX_ENSURE_STRONGIFY\n'
-                  '#define EX_ENSURE_STRONGIFY(var) __strong typeof(weak_##var) var = weak_##var; if (!var) return;\n'
-                  '#endif',
+          # The original #import <ExpoModulesCore/EXUtilities.h> correctly loads EXUtilities
+          # from the PCM. Previous attempts to stub @interface EXUtilities caused redefinition,
+          # and replacing the import with macros-only caused "must be imported from module" error.
+          # Fix: keep the original import intact -- no patch needed for EXVideoView.m.
+
+          # EXAudioRecordingPermissionRequester.m: EXFatal and EXErrorWithMessage are declared
+          # in EXDefines.h source but are ABSENT from the Expo 56 XCFramework PCM.
+          # Adding extern declarations inline satisfies -Werror=implicit-function-declaration.
+          print('Patching EXAudioRecordingPermissionRequester.m ...')
+          patch_file('node_modules/expo-av/ios/EXAV/EXAudioRecordingPermissionRequester.m', {
+              '#import <ExpoModulesCore/EXDefines.h>':
+                  '#import <ExpoModulesCore/EXDefines.h>\n'
+                  '/* EXFatal/EXErrorWithMessage: absent from Expo 56 XCFramework PCM */\n'
+                  'extern NSError *EXErrorWithMessage(NSString *);\n'
+                  'extern void EXFatal(NSError *);',
           })
 
           # EXAV.m: four service/delegate headers removed from Expo 56 XCFramework.
           # These are NOT in the PCM either (confirmed: EXAV.m compiles fine with stubs).
+          # EXAV-Swift.h: generated from ExpoVideoView.swift/VideoViewModule.swift which are
+          # excluded via EXCLUDED_SOURCE_FILE_NAMES; replace the conditional #import block
+          # with a forward declaration so [ExpoVideoView class] compiles (returns nil at runtime,
+          # harmless since WaveTalk does not use video).
           print('Patching EXAV.m ...')
           patch_file('node_modules/expo-av/ios/EXAV/EXAV.m', {
+              '#if __has_include(<EXAV/EXAV-Swift.h>)\n'
+              '#import <EXAV/EXAV-Swift.h>\n'
+              '#else\n'
+              '#import "EXAV-Swift.h"\n'
+              '#endif':
+                  '/* EXAV-Swift.h: Swift video files excluded via EXCLUDED_SOURCE_FILE_NAMES */\n'
+                  '@class ExpoVideoView;',
+
               '#import <ExpoModulesCore/EXEventEmitterService.h>':
                   '/* EXEventEmitterService stub: removed from Expo 56 XCFramework */\n'
                   '@protocol EXEventEmitterService <NSObject>\n'
