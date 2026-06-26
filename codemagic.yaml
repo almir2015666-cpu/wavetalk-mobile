@@ -166,13 +166,20 @@ workflows:
           project = Xcodeproj::Project.open('ios/Pods/Pods.xcodeproj')
 
           project.targets.each do |target|
-            # EXAV: exclude video Swift files — WaveTalk is audio-only, and the
-            # Swift video files trigger ExpoModulesCore Clang module build issues
+            # EXAV: disable Clang explicit modules and exclude video files.
+            # Xcode 26 explicit modules require each PCM to be listed in the cc1
+            # command. EXVideoPlayerViewController.m only receives AVKit PCM but
+            # AVKit transitively needs AVFoundation — without it the build fails.
+            # Disabling explicit modules lets the compiler resolve everything via
+            # implicit module loading, which handles cross-framework dependencies
+            # automatically. This also avoids PCM conflicts with our inline ObjC
+            # stubs for removed ExpoModulesCore headers.
             if target.name == 'EXAV'
               target.build_configurations.each do |config|
                 config.build_settings['EXCLUDED_SOURCE_FILE_NAMES'] = 'ExpoVideoView.swift VideoViewModule.swift'
+                config.build_settings['CLANG_EXPLICIT_MODULES_ENABLED'] = 'NO'
               end
-              puts 'EXAV: excluded video Swift files'
+              puts 'EXAV: excluded video Swift files, disabled explicit modules'
             end
 
             # ExpoTaskManager: expo-task-manager 14.x uses legacy RCT bridge APIs.
@@ -226,6 +233,9 @@ workflows:
 
       - name: Build number
         script: cd ios && agvtool new-version -all $(date +%s)
+
+      - name: Clean DerivedData
+        script: rm -rf ~/Library/Developer/Xcode/DerivedData/
 
       - name: Archive
         script: |
