@@ -32,6 +32,9 @@ workflows:
       - name: Install CocoaPods
         script: cd ios && pod install
 
+      - name: Remove push notification entitlement
+        script: /usr/libexec/PlistBuddy -c "Delete :aps-environment" ios/WaveTalk/WaveTalk.entitlements 2>/dev/null || true
+
       - name: Set up keychain
         script: keychain initialize
 
