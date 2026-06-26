@@ -15,8 +15,9 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.wavetalk.app",
+      "buildNumber": "1",
       "infoPlist": {
-        "NSMicrophoneUsageDescription": "WaveTalk precisa do microfone para transmissão de voz em push-to-talk.",
+        "NSMicrophoneUsageDescription": "WaveTalk precisa do microfone para transmissao de voz em push-to-talk.",
         "UIBackgroundModes": ["audio", "fetch", "remote-notification"],
         "ITSAppUsesNonExemptEncryption": false
       }
@@ -27,7 +28,8 @@
         "backgroundColor": "#07090f"
       },
       "permissions": ["RECORD_AUDIO"],
-      "package": "com.wavetalk.app"
+      "package": "com.wavetalk.app",
+      "versionCode": 1
     },
     "web": {
       "favicon": "./assets/favicon.png",
@@ -39,8 +41,6 @@
         { "microphonePermission": "WaveTalk precisa do microfone para push-to-talk." }
       ]
     ],
-    "extra": {
-      "serverUrl": "http://localhost:3001"
-    }
+    "newArchEnabled": false
   }
 }

@@ -1,21 +1,34 @@
 {
   "cli": {
-    "version": ">= 20.0.0"
+    "version": ">= 20.0.0",
+    "appVersionSource": "local"
   },
   "build": {
     "preview": {
       "distribution": "internal",
       "ios": {
         "simulator": false
+      },
+      "android": {
+        "buildType": "apk"
       }
     },
     "production": {
+      "autoIncrement": true,
       "ios": {
         "distribution": "store"
+      },
+      "android": {
+        "buildType": "app-bundle"
       }
     }
   },
   "submit": {
-    "production": {}
+    "production": {
+      "ios": {
+        "language": "pt-BR",
+        "appleId": ""
+      }
+    }
   }
 }
