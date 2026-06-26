@@ -26,21 +26,39 @@ workflows:
       - name: Fix Expo versions
         script: npx expo install --fix
 
-      - name: Verify package versions
-        script: |
-          node -e "
-            const pkgs = ['expo-av','expo-task-manager','expo-notifications','expo-haptics','expo-linear-gradient','expo-keep-awake','expo-file-system'];
-            pkgs.forEach(p => {
-              try { console.log(p + ': ' + require('./node_modules/' + p + '/package.json').version); }
-              catch(e) { console.log(p + ': NOT FOUND'); }
-            });
-          "
-
       - name: Prebuild iOS
         script: npx expo prebuild --platform ios --clean
 
       - name: Install CocoaPods
         script: cd ios && pod install
+
+      - name: Patch ExpoModulesCore headers for expo-av compatibility
+        script: |
+          python3 -c "
+          import os
+
+          stub = '''#pragma once
+          #import <Foundation/Foundation.h>
+
+          @protocol EXEventEmitter <NSObject>
+          - (NSArray<NSString *> *)supportedEvents;
+          - (void)startObserving;
+          - (void)stopObserving;
+          @end
+          '''
+
+          base = 'ios/Pods/ExpoModulesCore/ExpoModulesCore.xcframework'
+          for variant in os.listdir(base) if os.path.isdir(base) else []:
+              headers_dir = os.path.join(base, variant, 'ExpoModulesCore.framework', 'Headers')
+              if os.path.isdir(headers_dir):
+                  path = os.path.join(headers_dir, 'EXEventEmitter.h')
+                  if not os.path.exists(path):
+                      with open(path, 'w') as f:
+                          f.write(stub)
+                      print('Created: ' + path)
+                  else:
+                      print('Already exists: ' + path)
+          "
 
       - name: Remove push notification entitlement
         script: /usr/libexec/PlistBuddy -c "Delete :aps-environment" ios/WaveTalk/WaveTalk.entitlements 2>/dev/null || true

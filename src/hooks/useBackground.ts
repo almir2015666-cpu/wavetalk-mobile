@@ -106,8 +106,6 @@ export function useBackground(onNotificationTap?: () => void) {
       await silentSound.current.unloadAsync();
     } catch (_) {}
     silentSound.current = null;
-    // Note: do NOT change audio mode here — startRecording() will set
-    // allowsRecordingIOS:true when the user presses PTT in foreground.
   };
 
   useEffect(() => {
