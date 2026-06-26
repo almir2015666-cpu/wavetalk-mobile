@@ -109,57 +109,32 @@ workflows:
 
           # EXAV.m: EXEventEmitterService is NOT in Expo 56 XCFramework public Headers
           # (Build 15 confirmed: ScanDependencies failed with "file not found").
-          # EXAppLifecycleService, EXPermissionsMethodsDelegate, EXJavaScriptContextProvider
-          # ARE in the PCM (Build 14 confirmed ODR errors when we stubbed them -- the PCM
-          # already provides complete definitions). Keep their original imports intact.
-          #
-          # EXAV-Swift.h: generated from ExpoVideoView.swift/VideoViewModule.swift which are
-          # excluded via EXCLUDED_SOURCE_FILE_NAMES. Replace the conditional #import block
-          # with a full @interface stub (Build 16: @class alone is insufficient for
-          # [ExpoVideoView class] under ARC + Clang 21). Returns nil at runtime; safe since
-          # WaveTalk has no video. Also inject UMPromise* macros (from EXUnimodulesCompat.h
-          # Legacy/ which is absent from XCFramework module map) and EXFatal/EXErrorWithMessage
-          # externs (absent from XCFramework PCM, used at EXAV.m lines 269-593).
+          # UMPromiseResolveBlock/UMPromiseRejectBlock are #define macros from
+          # EXUnimodulesCompat.h (Legacy/) which is absent from the XCFramework module
+          # map. They expand to EXPromise* typedefs that ARE in the PCM (EXDefines.h).
+          # EXFatal/EXErrorWithMessage/EXLog*: absent from XCFramework PCM, provided
+          # via EXAV.h externs (which EXAV.m imports textually at line 13 when
+          # CLANG_EXPLICIT_MODULES_ENABLED=NO, so no duplicate externs needed here).
+          # NOTE: EXAV-Swift.h is NOT patched here -- ExpoVideoView.swift and
+          # VideoViewModule.swift compile normally (EXCLUDED_SOURCE_FILE_NAMES removed),
+          # generating EXAV-Swift.h so the EXAV.modulemap reference stays valid for
+          # ExpoModulesProvider.swift (Build 17 root cause fix).
           print('Patching EXAV.m ...')
           patch_file('node_modules/expo-av/ios/EXAV/EXAV.m', {
-              # EXEventEmitterService.h is NOT in the Expo 56 XCFramework public Headers/
-              # (Build 15: ScanDependencies failed at line 6 with "file not found").
-              # Provide a minimal stub that matches the actual protocol signature.
               '#import <ExpoModulesCore/EXEventEmitterService.h>':
-                  '/* EXEventEmitterService: absent from Expo 56 XCFramework Headers */\n'
+                  '/* EXEventEmitterService: absent from Expo 56 XCFramework public Headers */\n'
                   '@protocol EXEventEmitterService\n'
                   '- (void)sendEventWithName:(NSString *)name body:(id)body;\n'
-                  '@end',
-
-              # EXAV-Swift.h is never generated because ExpoVideoView.swift and
-              # VideoViewModule.swift are excluded via EXCLUDED_SOURCE_FILE_NAMES.
-              # Forward-declare ExpoVideoView so [ExpoVideoView class] compiles.
-              # Append EXFatal/EXErrorWithMessage externs here since EXDefines.h
-              # source declares them but they are absent from the XCFramework PCM.
-              '#if __has_include(<EXAV/EXAV-Swift.h>)\n'
-              '#import <EXAV/EXAV-Swift.h>\n'
-              '#else\n'
-              '#import "EXAV-Swift.h"\n'
-              '#endif':
-                  '/* EXAV-Swift.h: Swift video files excluded via EXCLUDED_SOURCE_FILE_NAMES.\n'
-                  '   Full @interface required so [ExpoVideoView class] compiles under\n'
-                  '   ARC + Clang 21 (returns nil at runtime; WaveTalk has no video). */\n'
-                  '@interface ExpoVideoView : NSObject\n'
                   '@end\n'
                   '/* UMPromiseResolveBlock/UMPromiseRejectBlock: #define macros from\n'
-                  '   EXUnimodulesCompat.h (Legacy/) which is absent from the Expo 56\n'
-                  '   XCFramework public Headers module map. Expand to EXPromise* typedefs\n'
-                  '   that ARE in the PCM (EXDefines.h). */\n'
+                  '   EXUnimodulesCompat.h (Legacy/) absent from Expo 56 XCFramework\n'
+                  '   module map. Expand to EXPromise* typedefs that ARE in the PCM. */\n'
                   '#ifndef UMPromiseResolveBlock\n'
                   '#define UMPromiseResolveBlock EXPromiseResolveBlock\n'
                   '#endif\n'
                   '#ifndef UMPromiseRejectBlock\n'
                   '#define UMPromiseRejectBlock EXPromiseRejectBlock\n'
-                  '#endif\n'
-                  '/* EXFatal/EXErrorWithMessage: also in EXAV.h externs but repeated\n'
-                  '   here since EXAV.m uses them at lines 269-593. */\n'
-                  'extern NSError *EXErrorWithMessage(NSString *);\n'
-                  'extern void EXFatal(NSError *);',
+                  '#endif',
           })
 
           print('expo-av patches done.')
@@ -180,10 +155,13 @@ workflows:
           project.targets.each do |target|
             if target.name == 'EXAV'
               target.build_configurations.each do |config|
-                config.build_settings['EXCLUDED_SOURCE_FILE_NAMES'] = 'ExpoVideoView.swift VideoViewModule.swift'
+                # Do NOT set EXCLUDED_SOURCE_FILE_NAMES: ExpoVideoView.swift and
+                # VideoViewModule.swift must compile so that Xcode generates EXAV-Swift.h.
+                # The EXAV.modulemap references that header; without it,
+                # ExpoModulesProvider.swift fails with 'could not build ObjC module EXAV'.
                 config.build_settings['CLANG_EXPLICIT_MODULES_ENABLED'] = 'NO'
               end
-              puts 'EXAV: excluded video Swift files, disabled explicit modules'
+              puts 'EXAV: disabled explicit modules (Swift files compile normally)'
             end
 
             if target.name == 'ExpoTaskManager'
