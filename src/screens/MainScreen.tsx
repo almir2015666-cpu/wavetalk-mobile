@@ -14,7 +14,6 @@ import { useAudio }        from '../hooks/useAudio';
 import { useBackground }   from '../hooks/useBackground';
 import { usePTTSounds }    from '../hooks/usePTTSounds';
 import { useHaptics }      from '../hooks/useHaptics';
-import { useWatch }        from '../hooks/useWatch';
 import { useApp }          from '../contexts/AppContext';
 import PTTButton           from '../components/PTTButton';
 import Visualizer          from '../components/Visualizer';
@@ -348,22 +347,6 @@ export default function MainScreen({ myName, myChannel: initChannel, myPin, myCh
   const activateLock = useCallback(() => {
     setLocked(true);
   }, []);
-
-  // ── Apple Watch bridge ────────────────────────────────────────────
-  const { sendToWatch } = useWatch(startTalking, stopTalking);
-
-  // Envia estado atual para o Watch sempre que muda
-  useEffect(() => {
-    const speaker = talkerId && talkerId !== myId.current
-      ? (users.find(u => u.id === talkerId)?.name ?? '')
-      : talking ? myName : '';
-    sendToWatch({
-      channel,
-      speaker,
-      talking: !!talkerId,
-      members: users.length,
-    });
-  }, [channel, talkerId, talking, users]);
 
   const STATUS_CONFIG = {
     available: { label: 'Disponível', color: C.green,  icon: '●' },
