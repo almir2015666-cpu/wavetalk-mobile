@@ -3,298 +3,134 @@ workflows:
     name: WaveTalk iOS TestFlight
     max_build_duration: 60
     instance_type: mac_mini_m2
-    integrations:
-      app_store_connect: appstore_codemagic_admin
-    environment:
-      node: 22
-      groups:
-        - wavetalk
-      vars:
-        XCODE_WORKSPACE: "ios/WaveTalk.xcworkspace"
-        XCODE_SCHEME: "WaveTalk"
     triggering:
       events:
         - push
       branch_patterns:
         - pattern: main
           include: true
+    integrations:
+      app_store_connect: appstore_codemagic_admin
+    environment:
+      xcode: 26.4
+      node: 22
+      groups:
+        - wavetalk
+      vars:
+        BUNDLE_ID: "com.wavetalk.app"
+        XCODE_WORKSPACE: "ios/WaveTalk.xcworkspace"
+        XCODE_SCHEME: "WaveTalk"
     scripts:
-      - name: Install dependencies
+      - name: Instalar dependências
         script: npm install --legacy-peer-deps
-
-      - name: Fix Expo versions
-        script: npx expo install --fix
-
-      - name: Patch expo-av source for Expo 56 XCFramework compatibility
-        script: |
-          python3 - << 'PYEOF'
-          import os
-
-          def patch_file(path, replacements):
-              if not os.path.exists(path):
-                  print(f'{path} not found - skip')
-                  return
-              with open(path) as f:
-                  content = f.read()
-              changed = False
-              for orig, stub in replacements.items():
-                  if orig in content:
-                      content = content.replace(orig, stub)
-                      print(f'  Patched: {orig}')
-                      changed = True
-                  else:
-                      print(f'  Already patched or absent: {orig}')
-              if changed:
-                  with open(path, 'w') as f:
-                      f.write(content)
-
-          # EXAV.h: EXEventEmitter.h removed from XCFramework public headers.
-          # NOT in PCM either (confirmed: EXAV.m compiles fine with this stub).
-          print('Patching EXAV.h ...')
-          patch_file('node_modules/expo-av/ios/EXAV/EXAV.h', {
-              '#import <ExpoModulesCore/EXEventEmitter.h>':
-                  '/* EXEventEmitter stub: absent from Expo 56 XCFramework public Headers */\n'
-                  '@protocol EXEventEmitter <NSObject>\n'
-                  '- (NSArray<NSString *> *)supportedEvents;\n'
-                  '- (void)startObserving;\n'
-                  '- (void)stopObserving;\n'
-                  '@end\n'
-                  '/* EXLogInfo/Warn/Error, EXFatal, EXErrorWithMessage: declared in\n'
-                  '   EXDefines.h npm source but ABSENT from the Expo 56 XCFramework PCM.\n'
-                  '   Forward-declared here so every file that imports EXAV.h\n'
-                  '   (EXAVPlayerData.m, EXAV.m, EXAudioSessionManager.m, etc.) compiles. */\n'
-                  'extern void EXLogInfo(NSString *format, ...);\n'
-                  'extern void EXLogWarn(NSString *format, ...);\n'
-                  'extern void EXLogError(NSString *format, ...);\n'
-                  'extern NSError *EXErrorWithMessage(NSString *);\n'
-                  'extern void EXFatal(NSError *);',
-          })
-
-          # EXVideoView.h: two headers missing from XCFramework public Headers/.
-          # EXModuleRegistry IS in the ExpoModulesCore PCM (umbrella header exports it).
-          # Using @class forward declaration avoids redefinition -- the PCM supplies
-          # the full definition when ExpoModulesCore loads via EXModuleRegistryConsumer.h.
-          # EXLegacyExpoViewProtocol is NOT in the PCM (completely removed), so it
-          # needs a full inline stub for the protocol conformance declaration.
-          print('Patching EXVideoView.h ...')
-          patch_file('node_modules/expo-av/ios/EXAV/Video/EXVideoView.h', {
-              '#import <ExpoModulesCore/EXModuleRegistry.h>':
-                  '/* EXModuleRegistry: forward-declare only; PCM provides full def */\n'
-                  '@class EXModuleRegistry;',
-
-              '#import <ExpoModulesCore/EXLegacyExpoViewProtocol.h>':
-                  '/* EXLegacyExpoViewProtocol stub: removed from Expo 56 PCM */\n'
-                  '@protocol EXLegacyExpoViewProtocol <NSObject>\n'
-                  '@optional\n'
-                  '@end',
-          })
-
-          # EXVideoView.m: EXUtilities IS in the ExpoModulesCore PCM.
-          # The original #import <ExpoModulesCore/EXUtilities.h> correctly loads EXUtilities
-          # from the PCM. Previous attempts to stub @interface EXUtilities caused redefinition,
-          # and replacing the import with macros-only caused "must be imported from module" error.
-          # Fix: keep the original import intact -- no patch needed for EXVideoView.m.
-
-          # EXAudioRecordingPermissionRequester.m: EXFatal and EXErrorWithMessage are declared
-          # in EXDefines.h source but are ABSENT from the Expo 56 XCFramework PCM.
-          # Adding extern declarations inline satisfies -Werror=implicit-function-declaration.
-          print('Patching EXAudioRecordingPermissionRequester.m ...')
-          patch_file('node_modules/expo-av/ios/EXAV/EXAudioRecordingPermissionRequester.m', {
-              '#import <ExpoModulesCore/EXDefines.h>':
-                  '#import <ExpoModulesCore/EXDefines.h>\n'
-                  '/* EXFatal/EXErrorWithMessage: absent from Expo 56 XCFramework PCM */\n'
-                  'extern NSError *EXErrorWithMessage(NSString *);\n'
-                  'extern void EXFatal(NSError *);',
-          })
-
-          # EXAV.m patches:
-          # 1. EXEventEmitterService.h is absent from Expo 56 XCFramework public Headers
-          #    (Build 15 confirmed: ScanDependencies failed with "file not found").
-          # 2. EXAV-Swift.h is never generated because ExpoVideoView.swift and
-          #    VideoViewModule.swift are excluded via EXCLUDED_SOURCE_FILE_NAMES
-          #    (Build 18 confirmed: those files have Swift API incompatibilities with
-          #    the XCFramework -- Promise.ResolveClosure != EXPromiseResolveBlock).
-          #    The EXAV.modulemap Swift submodule block is removed separately (see
-          #    "Patch EXAV module map" step). Here we replace the #if __has_include
-          #    block with a minimal ExpoVideoView stub + UMPromise* macros.
-          # 3. UMPromiseResolveBlock/UMPromiseRejectBlock: #define macros from
-          #    EXUnimodulesCompat.h (Legacy/), absent from XCFramework module map.
-          # 4. EXFatal/EXErrorWithMessage: also provided via EXAV.h externs, but
-          #    repeated here for clarity since EXAV.m uses them at lines 269-593.
-          print('Patching EXAV.m ...')
-          patch_file('node_modules/expo-av/ios/EXAV/EXAV.m', {
-              '#import <ExpoModulesCore/EXEventEmitterService.h>':
-                  '/* EXEventEmitterService: absent from Expo 56 XCFramework public Headers */\n'
-                  '@protocol EXEventEmitterService\n'
-                  '- (void)sendEventWithName:(NSString *)name body:(id)body;\n'
-                  '@end',
-
-              '#if __has_include(<EXAV/EXAV-Swift.h>)\n'
-              '#import <EXAV/EXAV-Swift.h>\n'
-              '#else\n'
-              '#import "EXAV-Swift.h"\n'
-              '#endif':
-                  '/* EXAV-Swift.h not generated: ExpoVideoView.swift excluded (Build 18:\n'
-                  '   Promise.ResolveClosure incompatible with EXPromiseResolveBlock in\n'
-                  '   the Expo 56 XCFramework Swift API). Full @interface required so\n'
-                  '   [ExpoVideoView class] compiles; returns nil at runtime (no video). */\n'
-                  '@interface ExpoVideoView : NSObject\n'
-                  '@end\n'
-                  '/* UMPromiseResolveBlock/UMPromiseRejectBlock: macros from\n'
-                  '   EXUnimodulesCompat.h (Legacy/) absent from XCFramework module map.\n'
-                  '   Expand to EXPromise* typedefs that ARE in the PCM (EXDefines.h). */\n'
-                  '#ifndef UMPromiseResolveBlock\n'
-                  '#define UMPromiseResolveBlock EXPromiseResolveBlock\n'
-                  '#endif\n'
-                  '#ifndef UMPromiseRejectBlock\n'
-                  '#define UMPromiseRejectBlock EXPromiseRejectBlock\n'
-                  '#endif\n'
-                  '/* EXFatal/EXErrorWithMessage: absent from Expo 56 XCFramework PCM */\n'
-                  'extern NSError *EXErrorWithMessage(NSString *);\n'
-                  'extern void EXFatal(NSError *);',
-          })
-
-          print('expo-av patches done.')
-          PYEOF
 
       - name: Prebuild iOS
         script: npx expo prebuild --platform ios --clean
 
-      - name: Install CocoaPods
-        script: cd ios && pod install
-
-      - name: Patch EXAV module map
+      - name: Patch Podfile — Xcode 26 antes do pod install
         script: |
-          python3 - << 'PYEOF'
-          import re, os
+          node -e "
+          const fs = require('fs');
+          const q = String.fromCharCode(39);
+          let c = fs.readFileSync('ios/Podfile', 'utf8');
+          const lines = c.split('\n');
 
-          # ExpoVideoView.swift and VideoViewModule.swift are excluded via
-          # EXCLUDED_SOURCE_FILE_NAMES because they have Swift API type mismatches
-          # against the Expo 56 XCFramework (Promise.ResolveClosure vs EXPromiseResolveBlock).
-          # Since those files are excluded, the Swift compiler never generates EXAV-Swift.h.
-          # However, CocoaPods auto-generates a 'module EXAV.Swift' block in EXAV.modulemap
-          # that references EXAV-Swift.h. Any Swift code that imports the EXAV module
-          # (ExpoModulesProvider.swift) fails with 'header not found' unless we remove it.
-          path = 'ios/Pods/Target Support Files/EXAV/EXAV.modulemap'
-          if not os.path.exists(path):
-              print(f'WARNING: {path} not found -- check CocoaPods pod name/layout')
-          else:
-              with open(path) as f:
-                  content = f.read()
-              # Remove the entire 'module EXAV.Swift { ... }' block (single-level braces).
-              patched = re.sub(r'\nmodule EXAV\.Swift\s*\{[^}]*\}', '', content)
-              if patched != content:
-                  with open(path, 'w') as f:
-                      f.write(patched)
-                  print('Patched EXAV.modulemap: removed module EXAV.Swift block')
-              else:
-                  print('EXAV.modulemap: module EXAV.Swift block not found (unexpected)')
-          PYEOF
-
-      - name: Patch Pods.xcodeproj
-        script: |
-          ruby << 'RUBY_EOF'
-          require 'xcodeproj'
-          project = Xcodeproj::Project.open('ios/Pods/Pods.xcodeproj')
-
-          project.targets.each do |target|
-            if target.name == 'EXAV'
-              target.build_configurations.each do |config|
-                # Exclude incompatible Swift files: ExpoVideoView.swift and VideoViewModule.swift
-                # fail with Swift API type mismatch against the Expo 56 XCFramework
-                # (Promise.ResolveClosure vs EXPromiseResolveBlock). The EXAV.modulemap
-                # Swift submodule block is removed separately so ExpoModulesProvider.swift
-                # can still import the EXAV ObjC module without EXAV-Swift.h.
-                config.build_settings['EXCLUDED_SOURCE_FILE_NAMES'] = 'ExpoVideoView.swift VideoViewModule.swift'
-                config.build_settings['CLANG_EXPLICIT_MODULES_ENABLED'] = 'NO'
-              end
-              puts 'EXAV: excluded incompatible Swift files, disabled explicit modules'
-            end
-
-            if target.name == 'ExpoTaskManager'
-              target.build_configurations.each do |config|
-                existing = Array(config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] || '$(inherited)')
-                existing.reject! { |d| d.to_s.include?('RCT_REMOVE_LEGACY_ARCH') }
-                existing << 'RCT_REMOVE_LEGACY_ARCH=0'
-                config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] = existing
-              end
-              puts 'ExpoTaskManager: set RCT_REMOVE_LEGACY_ARCH=0'
-            end
-          end
-
-          project.save
-          puts 'xcodeproj patches applied'
-          RUBY_EOF
-
-      - name: Remove push notification entitlement
-        script: /usr/libexec/PlistBuddy -c "Delete :aps-environment" ios/WaveTalk/WaveTalk.entitlements 2>/dev/null || true
-
-      - name: Create ExportOptions.plist
-        script: |
-          python3 -c "
-          import plistlib
-          data = {
-              'method': 'app-store-connect',
-              'teamID': '66U94U6Q5H',
-              'signingStyle': 'manual',
-              'provisioningProfiles': {'com.wavetalk.app': 'wavetalk-appstore'},
-              'uploadBitcode': False,
-              'uploadSymbols': True,
-              'compileBitcode': False
+          // Encontrar post_install do |installer| e sua indentacao
+          let piLine = -1, piIndent = '';
+          for (let i = 0; i < lines.length; i++) {
+            if (lines[i].includes('post_install do |installer|')) {
+              piLine = i; piIndent = lines[i].match(/^( *)/)[1]; break;
+            }
           }
-          with open('ios/ExportOptions.plist', 'wb') as f:
-              plistlib.dump(data, f, fmt=plistlib.FMT_XML)
+          if (piLine === -1) { console.log('ERROR: post_install not found'); process.exit(1); }
+          console.log('post_install at line ' + piLine + ', indent=[' + piIndent + ']');
+
+          // Injetar com indentacao correta (piIndent + 2 espacos)
+          const inner = piIndent + '  ';
+          const inject = [
+            inner + 'installer.pods_project.targets.each do |target|',
+            inner + '  target.build_configurations.each do |config|',
+            inner + '    config.build_settings[' + q + 'CLANG_CXX_LANGUAGE_STANDARD' + q + '] = ' + q + 'c++17' + q,
+            inner + '    config.build_settings[' + q + 'GCC_TREAT_WARNINGS_AS_ERRORS' + q + '] = ' + q + 'NO' + q,
+            inner + '    config.build_settings[' + q + 'SWIFT_SUPPRESS_WARNINGS' + q + '] = ' + q + 'YES' + q,
+            inner + '  end',
+            inner + 'end'
+          ].join('\n');
+
+          // Encontrar o 'end' com MESMA indentacao do post_install (fecha o bloco)
+          const closer = piIndent + 'end';
+          let inserted = false;
+          for (let i = piLine + 1; i < lines.length; i++) {
+            if (lines[i] === closer) {
+              lines.splice(i, 0, inject);
+              console.log('Injected before line ' + i);
+              inserted = true; break;
+            }
+          }
+          if (!inserted) { console.log('ERROR: matching end not found'); process.exit(1); }
+
+          c = lines.join('\n');
+          if (!c.includes('inhibit_all_warnings!')) c = 'inhibit_all_warnings!\n' + c;
+          fs.writeFileSync('ios/Podfile', c);
+          console.log('Done!');
           "
+          echo "=== Últimas 30 linhas do Podfile ==="
+          tail -30 ios/Podfile
 
-      - name: Set up keychain
-        script: keychain initialize
-
-      - name: Fetch signing files
+      - name: Instalar CocoaPods
         script: |
-          app-store-connect fetch-signing-files com.wavetalk.app \
-            --type IOS_APP_STORE \
-            --create
+          cd ios
+          pod install
+
+      - name: Remover push notification entitlement
+        script: |
+          /usr/libexec/PlistBuddy -c "Delete :aps-environment" ios/WaveTalk/WaveTalk.entitlements 2>/dev/null || true
+
+      - name: Criar/buscar certificado e perfil de distribuição
+        script: |
+          keychain initialize
+          app-store-connect fetch-signing-files "$BUNDLE_ID" --type IOS_APP_STORE --create
           keychain add-certificates
-          xcode-project use-profiles
 
-      - name: Build number
-        script: cd ios && agvtool new-version -all $(date +%s)
+      - name: Configurar assinatura automática
+        script: xcode-project use-profiles
 
-      - name: Clean DerivedData
-        script: rm -rf ~/Library/Developer/Xcode/DerivedData/
-
-      - name: Archive
+      - name: Definir número de build único
         script: |
-          mkdir -p build
-          xcodebuild \
-            -workspace "$XCODE_WORKSPACE" \
-            -scheme "$XCODE_SCHEME" \
-            -configuration Release \
-            -archivePath build/WaveTalk.xcarchive \
-            CODE_SIGN_STYLE=Manual \
-            CODE_SIGN_IDENTITY="Apple Distribution" \
-            PROVISIONING_PROFILE_SPECIFIER="wavetalk-appstore" \
-            DEVELOPMENT_TEAM=66U94U6Q5H \
-            archive \
-            2>&1 | tee build/xcodebuild.log
-          BUILD_EC=${PIPESTATUS[0]}
-          if [ $BUILD_EC -ne 0 ]; then
-            echo "=== COMPILATION ERRORS (first 80) ==="
-            grep -n " error:" build/xcodebuild.log | grep -v "note:\|warning:" | head -80 || true
-            echo "=== END ERRORS ==="
+          cd ios
+          agvtool new-version -all $(date +%s)
+
+      - name: Gerar .ipa assinado
+        script: |
+          set +e
+          xcode-project build-ipa \
+            --workspace "$XCODE_WORKSPACE" \
+            --scheme "$XCODE_SCHEME"
+          BUILD_EXIT=$?
+          if [ $BUILD_EXIT -ne 0 ]; then
+            echo ""
+            echo "====== LOGS DISPONIVEIS ======"
+            ls /tmp/xcodebuild_logs/ 2>/dev/null || echo "(sem logs em /tmp/xcodebuild_logs)"
+            echo ""
+            echo "====== ERROS DO COMPILADOR ======"
+            for LOG in /tmp/xcodebuild_logs/*.log; do
+              [ -f "$LOG" ] || continue
+              echo "--- $LOG ---"
+              grep -i "error:" "$LOG" | grep -v "^note:" | grep -v "warning:" | head -60
+            done
+            echo ""
+            echo "====== ULTIMAS 80 LINHAS DO LOG ======"
+            for LOG in /tmp/xcodebuild_logs/*.log; do
+              [ -f "$LOG" ] || continue
+              tail -80 "$LOG"
+            done
+            echo "================================="
           fi
-          exit $BUILD_EC
-
-      - name: Export IPA
-        script: |
-          xcodebuild -exportArchive \
-            -archivePath build/WaveTalk.xcarchive \
-            -exportOptionsPlist ios/ExportOptions.plist \
-            -exportPath build/
+          exit $BUILD_EXIT
 
     artifacts:
-      - build/*.ipa
-      - build/xcodebuild.log
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
 
     publishing:
       app_store_connect:
