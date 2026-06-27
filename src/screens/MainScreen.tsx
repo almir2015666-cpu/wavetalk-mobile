@@ -152,17 +152,18 @@ export default function MainScreen({ myName, myChannel: initChannel, myPin, myCh
   const panResponder = useRef(
     PanResponder.create({
       onMoveShouldSetPanResponder: (_, gs) =>
-        Math.abs(gs.dx) > 12 && Math.abs(gs.dx) > Math.abs(gs.dy) * 1.5,
+        Math.abs(gs.dx) > 10 && Math.abs(gs.dx) > Math.abs(gs.dy) * 1.2,
       onPanResponderRelease: (_, gs) => {
-        if (Math.abs(gs.dx) < 60) return;
+        if (Math.abs(gs.dx) < 55) return;
         const list = channelListRef.current;
         const idx  = list.indexOf(channel);
-        if (gs.dx < 0 && idx < list.length - 1) {
+        if (gs.dx < 0) {
           // swipe left → next channel
-          switchChannel(list[idx + 1]);
-        } else if (gs.dx > 0 && idx > 0) {
-          // swipe right → previous channel
-          switchChannel(list[idx - 1]);
+          if (idx < list.length - 1) switchChannel(list[idx + 1]);
+        } else {
+          // swipe right → previous channel, or back to channel list
+          if (idx > 0) switchChannel(list[idx - 1]);
+          else onSwitchChannel();
         }
       },
     })

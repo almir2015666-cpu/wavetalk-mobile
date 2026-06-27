@@ -212,8 +212,15 @@ export default function ChannelPickerScreen({ myName, onJoin, onBack }: Props) {
 
       {/* Header */}
       <View style={s.header}>
-        {onBack ? (
-          <TouchableOpacity onPress={onBack} style={s.backBtn} activeOpacity={0.7}>
+        {(onBack || search.length > 0) ? (
+          <TouchableOpacity
+            onPress={() => {
+              if (search.length > 0) { setSearch(''); }
+              else if (onBack) onBack();
+            }}
+            style={s.backBtn}
+            activeOpacity={0.7}
+          >
             <Text style={s.backText}>←</Text>
           </TouchableOpacity>
         ) : <View style={{ width: 44 }} />}
