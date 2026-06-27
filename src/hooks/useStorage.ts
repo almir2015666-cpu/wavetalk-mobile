@@ -2,10 +2,14 @@ import * as FileSystem from 'expo-file-system/legacy';
 
 const FILE = (FileSystem.documentDirectory ?? '') + 'wavetalk_storage.json';
 
-interface Store {
-  userName?:      string;
-  hasOnboarded?:  boolean;
-  recentChannels?: string[];
+export interface Store {
+  userName?:        string;
+  hasOnboarded?:    boolean;
+  recentChannels?:  string[];
+  favoriteChannels?: string[];
+  theme?:           'dark' | 'light';
+  hapticLevel?:     'off' | 'light' | 'medium' | 'heavy';
+  soundTheme?:      'default' | 'military' | 'minimal';
 }
 
 let cache: Store | null = null;

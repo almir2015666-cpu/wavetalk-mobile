@@ -1,15 +1,16 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, ScrollView,
   StyleSheet, ActivityIndicator, RefreshControl, Animated, Modal,
   KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { StatusBar } from 'expo-status-bar';
+import { StatusBar }      from 'expo-status-bar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { C } from '../theme';
-import { SERVER_URL } from '../config';
-import LiveBackground from '../components/LiveBackground';
+import { useApp }         from '../contexts/AppContext';
+import { storage }        from '../hooks/useStorage';
+import { SERVER_URL }     from '../config';
+import LiveBackground     from '../components/LiveBackground';
 
 const CHANNEL_MAX = 20;
 
@@ -28,10 +29,7 @@ interface Props {
 }
 
 const ICONS: Record<string, string> = {
-  'geral-1': '📻',
-  'geral-2': '📻',
-  'geral-3': '📻',
-  'geral-4': '📻',
+  'geral-1': '📻', 'geral-2': '📻', 'geral-3': '📻', 'geral-4': '📻',
 };
 
 const DEFAULTS: Channel[] = [
@@ -42,20 +40,37 @@ const DEFAULTS: Channel[] = [
 ];
 
 export default function ChannelPickerScreen({ myName, onJoin, onBack }: Props) {
-  const insets    = useSafeAreaInsets();
+  const insets  = useSafeAreaInsets();
+  const { C }   = useApp();
   const scrollRef = useRef<ScrollView>(null);
-  const [channels,    setChannels]    = useState<Channel[]>(DEFAULTS);
-  const [loading,     setLoading]     = useState(true);
-  const [refreshing,  setRefreshing]  = useState(false);
-  const [newChannel,  setNewChannel]  = useState('');
-  const [newPin,      setNewPin]      = useState('');
-  const [joining,     setJoining]     = useState<string | null>(null);
+
+  const [channels,   setChannels]   = useState<Channel[]>(DEFAULTS);
+  const [loading,    setLoading]    = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [newChannel, setNewChannel] = useState('');
+  const [newPin,     setNewPin]     = useState('');
+  const [joining,    setJoining]    = useState<string | null>(null);
+  const [search,     setSearch]     = useState('');
+  const [favorites,  setFavorites]  = useState<string[]>([]);
+  const [recents,    setRecents]    = useState<string[]>([]);
+
   // PIN prompt for protected channels
-  const [pinPrompt,   setPinPrompt]   = useState<Channel | null>(null);
-  const [pinInput,    setPinInput]    = useState('');
-  const [pinError,    setPinError]    = useState(false);
+  const [pinPrompt, setPinPrompt] = useState<Channel | null>(null);
+  const [pinInput,  setPinInput]  = useState('');
+  const [pinError,  setPinError]  = useState(false);
 
   const fadeAnim = useRef(new Animated.Value(0)).current;
+
+  // Dynamic styles keyed on theme colors
+  const s = useMemo(() => makeStyles(C), [C]);
+
+  // Load favorites + recents from storage
+  useEffect(() => {
+    storage.load().then(store => {
+      setFavorites(store.favoriteChannels ?? []);
+      setRecents(store.recentChannels   ?? []);
+    });
+  }, []);
 
   useEffect(() => {
     Animated.timing(fadeAnim, { toValue: 1, duration: 350, useNativeDriver: true }).start();
@@ -67,29 +82,46 @@ export default function ChannelPickerScreen({ myName, onJoin, onBack }: Props) {
   const fetchChannels = async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 4000);
+    const timeout    = setTimeout(() => controller.abort(), 4000);
     try {
       const res  = await fetch(`${SERVER_URL}/api/channels`, { signal: controller.signal });
       const data = await res.json();
-      // Merge API channels with defaults so known channels always appear
       const apiMap = new Map<string, Channel>(data.map((c: Channel) => [c.name, c]));
       DEFAULTS.forEach(d => { if (!apiMap.has(d.name)) apiMap.set(d.name, d); });
       setChannels([...apiMap.values()]);
-    } catch {
-      // Keep whatever we have; API offline
-    } finally {
+    } catch {}
+    finally {
       clearTimeout(timeout);
       setLoading(false);
       setRefreshing(false);
     }
   };
 
+  const toggleFavorite = useCallback((name: string) => {
+    setFavorites(prev => {
+      const next = prev.includes(name)
+        ? prev.filter(f => f !== name)
+        : [...prev, name];
+      storage.save({ favoriteChannels: next });
+      return next;
+    });
+  }, []);
+
+  const addRecent = useCallback((name: string) => {
+    setRecents(prev => {
+      const next = [name, ...prev.filter(r => r !== name)].slice(0, 5);
+      storage.save({ recentChannels: next });
+      return next;
+    });
+  }, []);
+
   const handleJoin = (ch: Channel) => {
-    const isFull = (ch.isFull) || (ch.online >= CHANNEL_MAX);
+    const isFull = ch.isFull || ch.online >= CHANNEL_MAX;
     if (isFull) return;
     if (ch.hasPin) {
       setPinPrompt(ch); setPinInput(''); setPinError(false);
     } else {
+      addRecent(ch.name);
       setJoining(ch.name);
       setTimeout(() => onJoin(ch.name), 120);
     }
@@ -99,6 +131,7 @@ export default function ChannelPickerScreen({ myName, onJoin, onBack }: Props) {
     if (!pinPrompt) return;
     if (pinInput.length < 1) { setPinError(true); return; }
     const ch = pinPrompt;
+    addRecent(ch.name);
     setPinPrompt(null);
     setJoining(ch.name);
     setTimeout(() => onJoin(ch.name, pinInput), 120);
@@ -106,14 +139,75 @@ export default function ChannelPickerScreen({ myName, onJoin, onBack }: Props) {
 
   const canCreate = newChannel.trim().length >= 2;
 
+  // Filter by search query
+  const query    = search.trim().toLowerCase();
+  const filtered = query ? channels.filter(c => c.name.toLowerCase().includes(query)) : channels;
+
+  const favChannels    = filtered.filter(c => favorites.includes(c.name));
+  const otherChannels  = filtered.filter(c => !favorites.includes(c.name));
+  const recentChannels = !query
+    ? recents.map(n => channels.find(c => c.name === n)).filter((c): c is Channel => !!c && !favorites.includes(c.name))
+    : [];
+
+  // Inner card component
+  const ChannelCard = ({ ch }: { ch: Channel }) => {
+    const isJoining = joining === ch.name;
+    const isFull    = ch.isFull || ch.online >= CHANNEL_MAX;
+    const isFav     = favorites.includes(ch.name);
+    return (
+      <TouchableOpacity
+        style={[s.chCard, isJoining && s.chCardActive, isFull && s.chCardFull]}
+        onPress={() => handleJoin(ch)}
+        activeOpacity={isFull ? 1 : 0.75}
+      >
+        <View style={s.chIcon}>
+          <Text style={{ fontSize: 26 }}>{ICONS[ch.name] ?? '🔊'}</Text>
+        </View>
+
+        <View style={s.chInfo}>
+          <Text style={s.chName}># {ch.name}</Text>
+          <Text style={[s.chMeta, isFull && { color: C.red }]}>
+            {isFull
+              ? `Lotado (${ch.online}/${CHANNEL_MAX})`
+              : ch.online === 0
+              ? 'Vazio · Entre primeiro'
+              : `${ch.online}/${CHANNEL_MAX} online`}
+            {!isFull && ch.talking ? ' · 🎙' : ''}
+          </Text>
+        </View>
+
+        <View style={s.chRight}>
+          {/* Favorite star */}
+          <TouchableOpacity
+            onPress={e => { e.stopPropagation(); toggleFavorite(ch.name); }}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            activeOpacity={0.7}
+          >
+            <Text style={{ fontSize: 17, opacity: isFav ? 1 : 0.25 }}>{isFav ? '⭐' : '☆'}</Text>
+          </TouchableOpacity>
+          {ch.hasPin && !isFull && <Text style={{ fontSize: 13 }}>🔒</Text>}
+          {isFull
+            ? <Text style={{ fontSize: 16 }}>🚫</Text>
+            : ch.online > 0
+            ? (
+              <View style={[s.onlineBadge, { backgroundColor: ch.talking ? C.green : C.cyan }]}>
+                <Text style={s.onlineBadgeText}>{ch.online}</Text>
+              </View>
+            ) : null
+          }
+          {!isFull && <Text style={s.arrow}>{isJoining ? '…' : '→'}</Text>}
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
   return (
     <KeyboardAvoidingView
       style={[s.root, { paddingTop: insets.top }]}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       keyboardVerticalOffset={0}
     >
-      <StatusBar style="light" />
-
+      <StatusBar style={C.bg === '#07090f' ? 'light' : 'dark'} />
       <LiveBackground />
 
       {/* Header */}
@@ -138,11 +232,7 @@ export default function ChannelPickerScreen({ myName, onJoin, onBack }: Props) {
         contentContainerStyle={[s.scroll, { paddingBottom: insets.bottom + 40 }]}
         keyboardShouldPersistTaps="handled"
         refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={() => fetchChannels(true)}
-            tintColor={C.cyan}
-          />
+          <RefreshControl refreshing={refreshing} onRefresh={() => fetchChannels(true)} tintColor={C.cyan} />
         }
         showsVerticalScrollIndicator={false}
       >
@@ -154,128 +244,118 @@ export default function ChannelPickerScreen({ myName, onJoin, onBack }: Props) {
           <Text style={s.greetSub}>Escolha um canal para entrar ou crie o seu</Text>
         </View>
 
-        {/* Create new channel — above the channel list */}
-        <Text style={s.sectionLabel}>CRIAR CANAL PRIVADO</Text>
-
-        <View style={s.createCard}>
+        {/* ── BUSCA ── */}
+        <View style={s.searchBox}>
+          <Text style={{ fontSize: 16 }}>🔍</Text>
           <TextInput
-            style={s.createInput}
-            placeholder="Nome do canal (mín. 2 letras)"
+            style={s.searchInput}
+            placeholder="Buscar canal…"
             placeholderTextColor={C.text3}
-            value={newChannel}
-            onChangeText={t => setNewChannel(t.toLowerCase().replace(/\s+/g, '-'))}
-            maxLength={30}
+            value={search}
+            onChangeText={setSearch}
             autoCorrect={false}
             autoCapitalize="none"
-            returnKeyType="done"
+            returnKeyType="search"
             selectionColor={C.cyan}
           />
-          <TextInput
-            style={[s.createInput, { marginTop: -4 }]}
-            placeholder="PIN (opcional) — protege o canal"
-            placeholderTextColor={C.text3}
-            value={newPin}
-            onChangeText={t => setNewPin(t.replace(/\D/g, '').slice(0, 6))}
-            maxLength={6}
-            keyboardType="number-pad"
-            returnKeyType="done"
-            onSubmitEditing={() => canCreate && handleJoin({ name: newChannel.trim(), online: 0, talking: false })}
-            selectionColor={C.cyan}
-          />
-
-          <TouchableOpacity
-            style={[s.createBtn, !canCreate && { opacity: 0.35 }]}
-            onPress={() => {
-              if (!canCreate) return;
-              const ch: Channel = { name: newChannel.trim(), online: 0, talking: false };
-              setJoining(ch.name);
-              setTimeout(() => onJoin(ch.name, undefined, newPin || undefined), 120);
-            }}
-            disabled={!canCreate}
-            activeOpacity={0.8}
-          >
-            {canCreate ? (
-              <LinearGradient
-                colors={['#00d4ff', '#7c3aff']}
-                start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
-                style={s.createBtnInner}
-              >
-                <Text style={s.createBtnText}>Criar e entrar</Text>
-              </LinearGradient>
-            ) : (
-              <View style={[s.createBtnInner, { backgroundColor: C.card, borderWidth: 1, borderColor: C.border2 }]}>
-                <Text style={[s.createBtnText, { color: C.text3 }]}>Criar e entrar</Text>
-              </View>
-            )}
-          </TouchableOpacity>
-
-          <Text style={s.createHint}>
-            O canal desaparece automaticamente quando todos saem
-          </Text>
+          {search.length > 0 && (
+            <TouchableOpacity onPress={() => setSearch('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Text style={{ fontSize: 15, color: C.text3 }}>✕</Text>
+            </TouchableOpacity>
+          )}
         </View>
 
-        {/* Section label */}
-        <Text style={[s.sectionLabel, { marginTop: 28 }]}>CANAIS ATIVOS</Text>
+        {/* ── CRIAR CANAL (oculto durante busca) ── */}
+        {!query && (
+          <>
+            <Text style={s.sectionLabel}>CRIAR CANAL PRIVADO</Text>
+            <View style={s.createCard}>
+              <TextInput
+                style={s.createInput}
+                placeholder="Nome do canal (mín. 2 letras)"
+                placeholderTextColor={C.text3}
+                value={newChannel}
+                onChangeText={t => setNewChannel(t.toLowerCase().replace(/\s+/g, '-'))}
+                maxLength={30}
+                autoCorrect={false}
+                autoCapitalize="none"
+                returnKeyType="done"
+                selectionColor={C.cyan}
+              />
+              <TextInput
+                style={[s.createInput, { marginTop: -4 }]}
+                placeholder="PIN (opcional) — protege o canal"
+                placeholderTextColor={C.text3}
+                value={newPin}
+                onChangeText={t => setNewPin(t.replace(/\D/g, '').slice(0, 6))}
+                maxLength={6}
+                keyboardType="number-pad"
+                returnKeyType="done"
+                onSubmitEditing={() => canCreate && handleJoin({ name: newChannel.trim(), online: 0, talking: false })}
+                selectionColor={C.cyan}
+              />
+              <TouchableOpacity
+                style={[s.createBtn, !canCreate && { opacity: 0.35 }]}
+                onPress={() => {
+                  if (!canCreate) return;
+                  const ch: Channel = { name: newChannel.trim(), online: 0, talking: false };
+                  addRecent(ch.name);
+                  setJoining(ch.name);
+                  setTimeout(() => onJoin(ch.name, undefined, newPin || undefined), 120);
+                }}
+                disabled={!canCreate}
+                activeOpacity={0.8}
+              >
+                {canCreate ? (
+                  <LinearGradient colors={['#00d4ff', '#7c3aff']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={s.createBtnInner}>
+                    <Text style={s.createBtnText}>Criar e entrar</Text>
+                  </LinearGradient>
+                ) : (
+                  <View style={[s.createBtnInner, { backgroundColor: C.card, borderWidth: 1, borderColor: C.border2 }]}>
+                    <Text style={[s.createBtnText, { color: C.text3 }]}>Criar e entrar</Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+              <Text style={s.createHint}>O canal desaparece automaticamente quando todos saem</Text>
+            </View>
+          </>
+        )}
+
+        {/* ── FAVORITOS ── */}
+        {favChannels.length > 0 && (
+          <>
+            <Text style={[s.sectionLabel, { marginTop: query ? 0 : 28 }]}>⭐ FAVORITOS</Text>
+            {favChannels.map(ch => <ChannelCard key={ch.name} ch={ch} />)}
+          </>
+        )}
+
+        {/* ── RECENTES ── */}
+        {recentChannels.length > 0 && (
+          <>
+            <Text style={[s.sectionLabel, { marginTop: 20 }]}>🕐 RECENTES</Text>
+            {recentChannels.map(ch => <ChannelCard key={ch.name} ch={ch} />)}
+          </>
+        )}
+
+        {/* ── CANAIS ATIVOS ── */}
+        <Text style={[s.sectionLabel, { marginTop: (favChannels.length > 0 || recentChannels.length > 0) ? 20 : query ? 0 : 28 }]}>
+          {query ? `RESULTADOS (${filtered.length})` : 'CANAIS ATIVOS'}
+        </Text>
 
         {loading ? (
           <ActivityIndicator color={C.cyan} style={{ marginTop: 32 }} />
+        ) : otherChannels.length === 0 ? (
+          <Text style={s.emptyText}>
+            {query ? `Nenhum canal encontrado para "${search}"` : 'Nenhum canal disponível'}
+          </Text>
         ) : (
-          channels.map(ch => {
-            const isJoining = joining === ch.name;
-            const isFull    = ch.isFull || ch.online >= CHANNEL_MAX;
-            return (
-              <TouchableOpacity
-                key={ch.name}
-                style={[s.chCard, isJoining && s.chCardActive, isFull && s.chCardFull]}
-                onPress={() => handleJoin(ch)}
-                activeOpacity={isFull ? 1 : 0.75}
-              >
-                <View style={s.chIcon}>
-                  <Text style={{ fontSize: 26 }}>{ICONS[ch.name] ?? '🔊'}</Text>
-                </View>
-
-                <View style={s.chInfo}>
-                  <Text style={s.chName}># {ch.name}</Text>
-                  <Text style={[s.chMeta, isFull && { color: C.red }]}>
-                    {isFull
-                      ? `Lotado (${ch.online}/${CHANNEL_MAX})`
-                      : ch.online === 0
-                      ? 'Vazio · Entre primeiro'
-                      : `${ch.online}/${CHANNEL_MAX} online`}
-                    {!isFull && ch.talking ? ' · 🎙' : ''}
-                  </Text>
-                </View>
-
-                <View style={s.chRight}>
-                  {ch.hasPin && !isFull && <Text style={{ fontSize: 13 }}>🔒</Text>}
-                  {isFull
-                    ? <Text style={{ fontSize: 16 }}>🚫</Text>
-                    : ch.online > 0
-                    ? (
-                      <View style={[s.onlineBadge, { backgroundColor: ch.talking ? C.green : C.cyan }]}>
-                        <Text style={s.onlineBadgeText}>{ch.online}</Text>
-                      </View>
-                    ) : null
-                  }
-                  {!isFull && <Text style={s.arrow}>{isJoining ? '…' : '→'}</Text>}
-                </View>
-              </TouchableOpacity>
-            );
-          })
+          otherChannels.map(ch => <ChannelCard key={ch.name} ch={ch} />)
         )}
       </Animated.ScrollView>
 
       {/* ── PIN Prompt Modal ── */}
-      <Modal
-        visible={pinPrompt !== null}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setPinPrompt(null)}
-      >
-        <KeyboardAvoidingView
-          style={s.pinOverlay}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        >
+      <Modal visible={pinPrompt !== null} transparent animationType="fade" onRequestClose={() => setPinPrompt(null)}>
+        <KeyboardAvoidingView style={s.pinOverlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
           <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => setPinPrompt(null)} />
           <View style={s.pinSheet} onStartShouldSetResponder={() => true}>
             <Text style={s.pinTitle}>Canal protegido</Text>
@@ -293,11 +373,7 @@ export default function ChannelPickerScreen({ myName, onJoin, onBack }: Props) {
             />
             {pinError && <Text style={s.pinError}>PIN incorreto, tente novamente</Text>}
             <TouchableOpacity style={s.pinBtn} onPress={handlePinConfirm} activeOpacity={0.85}>
-              <LinearGradient
-                colors={['#00d4ff', '#7c3aff']}
-                start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
-                style={s.pinBtnInner}
-              >
+              <LinearGradient colors={['#00d4ff', '#7c3aff']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={s.pinBtnInner}>
                 <Text style={s.pinBtnText}>Entrar</Text>
               </LinearGradient>
             </TouchableOpacity>
@@ -309,79 +385,89 @@ export default function ChannelPickerScreen({ myName, onJoin, onBack }: Props) {
   );
 }
 
-const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: C.bg },
+// Styles factory — recreated when theme changes
+import { ThemeColors } from '../theme';
 
-  header: {
-    height: 54, flexDirection: 'row', alignItems: 'center',
-    justifyContent: 'space-between', paddingHorizontal: 12,
-    backgroundColor: C.surface, borderBottomWidth: 1, borderBottomColor: C.border,
-  },
-  backBtn:  { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
-  backText: { fontSize: 22, color: C.cyan },
-  logoRow:  { flexDirection: 'row', alignItems: 'center', gap: 7 },
-  logoMic:  { width: 8, height: 14, borderRadius: 4, backgroundColor: C.cyan },
-  logoText: { fontSize: 16, fontWeight: '900', color: C.cyan, letterSpacing: -0.5 },
+function makeStyles(C: ThemeColors) {
+  return StyleSheet.create({
+    root:  { flex: 1, backgroundColor: C.bg },
 
-  scroll: { paddingHorizontal: 16, paddingTop: 24 },
+    header: {
+      height: 54, flexDirection: 'row', alignItems: 'center',
+      justifyContent: 'space-between', paddingHorizontal: 12,
+      backgroundColor: C.surface, borderBottomWidth: 1, borderBottomColor: C.border,
+    },
+    backBtn:  { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+    backText: { fontSize: 22, color: C.cyan },
+    logoRow:  { flexDirection: 'row', alignItems: 'center', gap: 7 },
+    logoMic:  { width: 8, height: 14, borderRadius: 4, backgroundColor: C.cyan },
+    logoText: { fontSize: 16, fontWeight: '900', color: C.cyan, letterSpacing: -0.5 },
 
-  greetBox: { marginBottom: 28, alignItems: 'center' },
-  greet:    { fontSize: 26, fontWeight: '900', color: C.text, letterSpacing: -0.5, textAlign: 'center' },
-  greetSub: { fontSize: 14, color: C.text2, marginTop: 6, textAlign: 'center' },
+    scroll: { paddingHorizontal: 16, paddingTop: 24 },
 
-  sectionLabel: {
-    fontSize: 10, fontWeight: '700', color: C.text3,
-    letterSpacing: 1.4, textTransform: 'uppercase', marginBottom: 12,
-  },
+    greetBox: { marginBottom: 20, alignItems: 'center' },
+    greet:    { fontSize: 26, fontWeight: '900', color: C.text, letterSpacing: -0.5, textAlign: 'center' },
+    greetSub: { fontSize: 14, color: C.text2, marginTop: 6, textAlign: 'center' },
 
-  chCard: {
-    flexDirection: 'row', alignItems: 'center', gap: 14,
-    backgroundColor: C.card, borderWidth: 1, borderColor: C.border2,
-    borderRadius: 16, padding: 14, marginBottom: 10,
-  },
-  chCardActive: { borderColor: C.cyan + '88', backgroundColor: C.cyanDim },
-  chCardFull:   { opacity: 0.55, borderColor: C.red + '44' },
+    searchBox: {
+      flexDirection: 'row', alignItems: 'center', gap: 10,
+      backgroundColor: C.card, borderWidth: 1, borderColor: C.border2,
+      borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10, marginBottom: 20,
+    },
+    searchInput: { flex: 1, fontSize: 15, color: C.text, fontWeight: '500' },
 
-  chIcon: {
-    width: 48, height: 48, borderRadius: 14,
-    backgroundColor: C.surface, borderWidth: 1, borderColor: C.border,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  chInfo:  { flex: 1 },
-  chName:  { fontSize: 15, fontWeight: '800', color: C.text },
-  chMeta:  { fontSize: 12, color: C.text2, marginTop: 3 },
-  chRight: { alignItems: 'flex-end', gap: 6 },
+    sectionLabel: {
+      fontSize: 10, fontWeight: '700', color: C.text3,
+      letterSpacing: 1.4, textTransform: 'uppercase', marginBottom: 12,
+    },
+    emptyText: { fontSize: 13, color: C.text3, textAlign: 'center', marginTop: 24 },
 
-  onlineBadge: {
-    width: 22, height: 22, borderRadius: 11,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  onlineBadgeText: { fontSize: 10, fontWeight: '800', color: '#000' },
-  arrow: { fontSize: 18, color: C.text3, fontWeight: '700' },
+    chCard: {
+      flexDirection: 'row', alignItems: 'center', gap: 14,
+      backgroundColor: C.card, borderWidth: 1, borderColor: C.border2,
+      borderRadius: 16, padding: 14, marginBottom: 10,
+    },
+    chCardActive: { borderColor: C.cyan + '88', backgroundColor: C.cyanDim },
+    chCardFull:   { opacity: 0.55, borderColor: C.red + '44' },
+    chIcon: {
+      width: 48, height: 48, borderRadius: 14,
+      backgroundColor: C.surface, borderWidth: 1, borderColor: C.border,
+      alignItems: 'center', justifyContent: 'center',
+    },
+    chInfo:  { flex: 1 },
+    chName:  { fontSize: 15, fontWeight: '800', color: C.text },
+    chMeta:  { fontSize: 12, color: C.text2, marginTop: 3 },
+    chRight: { alignItems: 'flex-end', gap: 6 },
+    onlineBadge: {
+      width: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center',
+    },
+    onlineBadgeText: { fontSize: 10, fontWeight: '800', color: '#000' },
+    arrow: { fontSize: 18, color: C.text3, fontWeight: '700' },
 
-  createCard: {
-    backgroundColor: C.card, borderWidth: 1, borderColor: C.border2,
-    borderRadius: 16, padding: 16, gap: 12,
-  },
-  createInput: {
-    backgroundColor: C.surface, borderWidth: 1, borderColor: C.border2,
-    borderRadius: 12, paddingHorizontal: 16, paddingVertical: 14,
-    fontSize: 15, color: C.text, fontWeight: '500',
-  },
-  createBtn:      { borderRadius: 12, overflow: 'hidden' },
-  createBtnInner: { borderRadius: 12, paddingVertical: 15, alignItems: 'center' },
-  createBtnText:  { fontSize: 15, fontWeight: '800', color: '#fff' },
-  createHint: { fontSize: 11, color: C.text3, textAlign: 'center', lineHeight: 16 },
+    createCard: {
+      backgroundColor: C.card, borderWidth: 1, borderColor: C.border2,
+      borderRadius: 16, padding: 16, gap: 12,
+    },
+    createInput: {
+      backgroundColor: C.surface, borderWidth: 1, borderColor: C.border2,
+      borderRadius: 12, paddingHorizontal: 16, paddingVertical: 14,
+      fontSize: 15, color: C.text, fontWeight: '500',
+    },
+    createBtn:      { borderRadius: 12, overflow: 'hidden' },
+    createBtnInner: { borderRadius: 12, paddingVertical: 15, alignItems: 'center' },
+    createBtnText:  { fontSize: 15, fontWeight: '800', color: '#fff' },
+    createHint:     { fontSize: 11, color: C.text3, textAlign: 'center', lineHeight: 16 },
 
-  pinOverlay:  { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'space-between' },
-  pinSheet:    {
-    backgroundColor: C.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24,
-    padding: 24, gap: 14, borderTopWidth: 1, borderColor: C.border2,
-  },
-  pinTitle:    { fontSize: 18, fontWeight: '900', color: C.text },
-  pinSub:      { fontSize: 13, color: C.text2, lineHeight: 18 },
-  pinError:    { fontSize: 12, color: '#ff4444', fontWeight: '600', marginTop: -8 },
-  pinBtn:      { borderRadius: 12, overflow: 'hidden', marginTop: 4 },
-  pinBtnInner: { borderRadius: 12, paddingVertical: 15, alignItems: 'center' },
-  pinBtnText:  { fontSize: 15, fontWeight: '800', color: '#fff' },
-});
+    pinOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'space-between' },
+    pinSheet: {
+      backgroundColor: C.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24,
+      padding: 24, gap: 14, borderTopWidth: 1, borderColor: C.border2,
+    },
+    pinTitle: { fontSize: 18, fontWeight: '900', color: C.text },
+    pinSub:   { fontSize: 13, color: C.text2, lineHeight: 18 },
+    pinError: { fontSize: 12, color: '#ff4444', fontWeight: '600', marginTop: -8 },
+    pinBtn:      { borderRadius: 12, overflow: 'hidden', marginTop: 4 },
+    pinBtnInner: { borderRadius: 12, paddingVertical: 15, alignItems: 'center' },
+    pinBtnText:  { fontSize: 15, fontWeight: '800', color: '#fff' },
+  });
+}

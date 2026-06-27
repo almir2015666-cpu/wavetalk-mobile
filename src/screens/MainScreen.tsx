@@ -1,26 +1,28 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
   Animated, Modal, ActivityIndicator, Share, TextInput,
-  KeyboardAvoidingView, Platform, Alert,
+  KeyboardAvoidingView, Platform, Alert, PanResponder,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import * as Haptics from 'expo-haptics';
 import { useKeepAwake } from 'expo-keep-awake';
 
 import { useSocket, User } from '../hooks/useSocket';
 import { useAudio }        from '../hooks/useAudio';
 import { useBackground }   from '../hooks/useBackground';
 import { usePTTSounds }    from '../hooks/usePTTSounds';
+import { useHaptics }      from '../hooks/useHaptics';
+import { useApp }          from '../contexts/AppContext';
 import PTTButton           from '../components/PTTButton';
 import Visualizer          from '../components/Visualizer';
-import { C, avatarColor }  from '../theme';
+import SettingsModal       from '../components/SettingsModal';
+import { avatarColor }     from '../theme';
 import { SERVER_URL }      from '../config';
 
-const MAX_TALK_SECS  = 60;
-const CHANNEL_MAX    = 20;
+const MAX_TALK_SECS = 60;
+const CHANNEL_MAX   = 20;
 
 function fmtMs(ms: number): string {
   const s = Math.floor(ms / 1000);
@@ -56,7 +58,13 @@ const ICONS: Record<string, string> = {
 };
 
 export default function MainScreen({ myName, myChannel: initChannel, myPin, myChannelPin, onLogout, onSwitchChannel }: Props) {
-  const insets = useSafeAreaInsets();
+  const insets   = useSafeAreaInsets();
+  const { C, soundTheme } = useApp();
+  const haptics  = useHaptics();
+
+  // Dynamic styles
+  const s = useMemo(() => makeStyles(C), [C]);
+
   const [connected,    setConnected]    = useState(false);
   const [reconnecting, setReconnecting] = useState(false);
   const [users,        setUsers]        = useState<User[]>([]);
@@ -73,6 +81,10 @@ export default function MainScreen({ myName, myChannel: initChannel, myPin, myCh
   const [isPlaying,    setIsPlaying]    = useState(false);
   const [channelTime,  setChannelTime]  = useState('agora');
   const [fullBanner,   setFullBanner]   = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
+  // Swipe channel list
+  const channelListRef = useRef<string[]>([]);
 
   // Channel switch modal
   const [chModalOpen,    setChModalOpen]    = useState(false);
@@ -80,29 +92,33 @@ export default function MainScreen({ myName, myChannel: initChannel, myPin, myCh
   const [chModalLoading, setChModalLoading] = useState(false);
 
   // Session stats modal
-  const [statsOpen,     setStatsOpen]    = useState(false);
-  const [pendingExit,   setPendingExit]  = useState<'logout' | 'switch' | null>(null);
+  const [statsOpen,   setStatsOpen]   = useState(false);
+  const [pendingExit, setPendingExit] = useState<'logout' | 'switch' | null>(null);
 
   // Log expanded modal
-  const [logExpanded,   setLogExpanded]  = useState(false);
-  const [playingId,     setPlayingId]    = useState<string | null>(null);
+  const [logExpanded, setLogExpanded] = useState(false);
+  const [playingId,   setPlayingId]   = useState<string | null>(null);
 
   // PIN prompt when join:rejected reason=pin
-  const [pinModal,      setPinModal]     = useState(false);
-  const [pinChannel,    setPinChannel]   = useState('');
-  const [pinInput,      setPinInput]     = useState('');
-  const [pinError,      setPinError]     = useState(false);
+  const [pinModal,  setPinModal]  = useState(false);
+  const [pinChannel, setPinChannel] = useState('');
+  const [pinInput,  setPinInput]  = useState('');
+  const [pinError,  setPinError]  = useState(false);
 
   // User status
   type UserStatus = 'available' | 'busy' | 'silent';
-  const [myStatus,      setMyStatus]     = useState<UserStatus>('available');
-  const [statusModal,   setStatusModal]  = useState(false);
+  const [myStatus,    setMyStatus]    = useState<UserStatus>('available');
+  const [statusModal, setStatusModal] = useState(false);
   const myStatusRef = useRef<UserStatus>('available');
 
   // Moderator
-  const [iAmMod,        setIAmMod]       = useState(false);
-  const [modTarget,     setModTarget]    = useState<User | null>(null);
-  const [mutedByMod,    setMutedByMod]   = useState(false);
+  const [iAmMod,    setIAmMod]    = useState(false);
+  const [modTarget, setModTarget] = useState<User | null>(null);
+  const [mutedByMod, setMutedByMod] = useState(false);
+
+  // Swipe hint
+  const [swipeHint, setSwipeHint] = useState(false);
+  const swipeHintTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const bannerAnim = useRef(new Animated.Value(0)).current;
   const myId       = useRef('');
@@ -111,9 +127,8 @@ export default function MainScreen({ myName, myChannel: initChannel, myPin, myCh
   const joinTimeRef = useRef(0);
   const clockTimer  = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Session stats (refs — no re-render needed during session)
-  const sessionTxCount  = useRef(0);
-  const sessionTalkMs   = useRef(0);
+  const sessionTxCount = useRef(0);
+  const sessionTalkMs  = useRef(0);
 
   useKeepAwake();
   const audio     = useAudio(setIsPlaying);
@@ -122,7 +137,38 @@ export default function MainScreen({ myName, myChannel: initChannel, myPin, myCh
 
   useEffect(() => { audio.requestPermission().then(ok => setHasMic(ok)); }, []);
 
-  // ── Channel time clock ─────────────────────────────────────────────
+  // Fetch channel list for swipe navigation
+  const refreshChannelList = useCallback(async () => {
+    try {
+      const res  = await fetch(`${SERVER_URL}/api/channels`);
+      const data = await res.json() as Channel[];
+      channelListRef.current = data.map(c => c.name);
+    } catch {}
+  }, []);
+
+  useEffect(() => { refreshChannelList(); }, [channel]);
+
+  // ── Swipe PanResponder ────────────────────────────────────────────
+  const panResponder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, gs) =>
+        Math.abs(gs.dx) > 12 && Math.abs(gs.dx) > Math.abs(gs.dy) * 1.5,
+      onPanResponderRelease: (_, gs) => {
+        if (Math.abs(gs.dx) < 60) return;
+        const list = channelListRef.current;
+        const idx  = list.indexOf(channel);
+        if (gs.dx < 0 && idx < list.length - 1) {
+          // swipe left → next channel
+          switchChannel(list[idx + 1]);
+        } else if (gs.dx > 0 && idx > 0) {
+          // swipe right → previous channel
+          switchChannel(list[idx - 1]);
+        }
+      },
+    })
+  ).current;
+
+  // ── Channel time clock ────────────────────────────────────────────
   const startClock = useCallback(() => {
     joinTimeRef.current = Date.now();
     setChannelTime('agora');
@@ -134,7 +180,7 @@ export default function MainScreen({ myName, myChannel: initChannel, myPin, myCh
 
   useEffect(() => () => { if (clockTimer.current) clearInterval(clockTimer.current); }, []);
 
-  // ── Banner helpers ─────────────────────────────────────────────────
+  // ── Banner helpers ────────────────────────────────────────────────
   const showBanner = useCallback((name: string) => {
     setSpeakerName(name);
     Animated.spring(bannerAnim, { toValue: 1, useNativeDriver: true, speed: 18, bounciness: 5 }).start();
@@ -170,19 +216,16 @@ export default function MainScreen({ myName, myChannel: initChannel, myPin, myCh
       if (me) setIAmMod(!!me.isMod);
       if (talker && talker !== myId.current) {
         const u = list.find(u => u.id === talker);
-        if (u) {
-          showBanner(u.name);
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-        }
+        if (u) { showBanner(u.name); haptics.impact('Medium'); }
       } else if (!talker) hideBanner();
     },
-    onPttStart:  (userId, name) => {
+    onPttStart: (userId, name) => {
       if (userId !== myId.current) {
         showBanner(name);
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+        haptics.impact('Medium');
       }
     },
-    onPttStop:   (userId, name, duration) => {
+    onPttStop: (userId, name, duration) => {
       if (userId !== myId.current) {
         hideBanner();
         const audioData = pendingAudioRef.current[userId];
@@ -196,13 +239,11 @@ export default function MainScreen({ myName, myChannel: initChannel, myPin, myCh
     },
     onPttBlocked: () => {
       setTalking(false); setLocked(false); clearTalkTimer();
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+      haptics.notification('Warning');
     },
-    onAudioRecv:  (data, from, name) => {
-      // Block incoming audio when busy
+    onAudioRecv: (data, from, name) => {
       if (myStatusRef.current === 'busy') return;
-      // Stronger haptic for incoming audio — distinct from UI taps
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
+      haptics.impact('Heavy');
       notifyIncoming(name);
       audio.playAudio(data).catch(() => {});
       const pending = pendingStopRef.current[from];
@@ -213,21 +254,21 @@ export default function MainScreen({ myName, myChannel: initChannel, myPin, myCh
         pendingAudioRef.current[from] = data;
       }
     },
-    onPing:        (ms) => setPing(ms + 'ms'),
+    onPing:       (ms) => setPing(ms + 'ms'),
     onJoinRejected: (reason, ch) => {
       if (reason === 'full') {
         setFullBanner(true);
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
+        haptics.notification('Error');
       } else if (reason === 'pin') {
         setPinChannel(ch);
         setPinInput('');
         setPinError(false);
         setPinModal(true);
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+        haptics.notification('Warning');
       }
     },
     onKicked: (by) => {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
+      haptics.notification('Error');
       Alert.alert('Expulso do canal', `${by} removeu você do canal.`, [
         { text: 'OK', onPress: onLogout },
       ]);
@@ -235,7 +276,7 @@ export default function MainScreen({ myName, myChannel: initChannel, myPin, myCh
     onMuted: (by) => {
       setMutedByMod(true);
       setMuted(true);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+      haptics.notification('Warning');
       Alert.alert('Microfone bloqueado', `${by} silenciou você neste canal.`);
     },
     onUnmuted: (by) => {
@@ -268,17 +309,15 @@ export default function MainScreen({ myName, myChannel: initChannel, myPin, myCh
     setTalking(true);
     talkStart.current = Date.now();
     sessionTxCount.current += 1;
-    // Strong double-pulse haptic on PTT press
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-    pttSounds.playStart();
+    haptics.notification('Success');
+    if (soundTheme !== 'minimal') pttSounds.playStart();
     pttStart();
     startTalkTimer();
-    // Wait for chirp to finish (~130ms) before opening mic, so sound isn't captured
     if (hasMic && !muted) {
       await new Promise(r => setTimeout(r, 160));
       await audio.startRecording();
     }
-  }, [talking, connected, hasMic, muted]);
+  }, [talking, connected, hasMic, muted, soundTheme]);
 
   const stopTalking = useCallback(async () => {
     if (!talking) return;
@@ -287,8 +326,8 @@ export default function MainScreen({ myName, myChannel: initChannel, myPin, myCh
     clearTalkTimer();
     const dur = Date.now() - talkStart.current;
     sessionTalkMs.current += dur;
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
-    pttSounds.playStop();
+    haptics.notification('Warning');
+    if (soundTheme !== 'minimal') pttSounds.playStop();
     pttStop();
     if (hasMic && !muted) {
       const b64 = await audio.stopRecording();
@@ -296,27 +335,25 @@ export default function MainScreen({ myName, myChannel: initChannel, myPin, myCh
     }
     const durS = Math.round(dur / 1000);
     addLog(myName, `${Math.floor(durS / 60)}:${String(durS % 60).padStart(2, '0')}`);
-  }, [talking, hasMic, muted, myName]);
+  }, [talking, hasMic, muted, myName, soundTheme]);
 
-  // Lock = keep transmitting
   const toggleLock = useCallback(async () => {
     if (locked) { setLocked(false); await stopTalking(); }
     else        { setLocked(true);  await startTalking(); }
   }, [locked, talking, connected]);
 
-  // Share channel
   const STATUS_CONFIG = {
     available: { label: 'Disponível', color: C.green,  icon: '●' },
     busy:      { label: 'Ocupado',    color: C.red,    icon: '●' },
     silent:    { label: 'Silencioso', color: C.text3,  icon: '🔇' },
   } as const;
 
-  const changeStatus = (s: UserStatus) => {
-    myStatusRef.current = s;
-    setMyStatus(s);
-    setStatus(s);
+  const changeStatus = (st: UserStatus) => {
+    myStatusRef.current = st;
+    setMyStatus(st);
+    setStatus(st);
     setStatusModal(false);
-    if (s === 'silent') setMuted(true);
+    if (st === 'silent') setMuted(true);
     else if (myStatus === 'silent') setMuted(false);
   };
 
@@ -327,21 +364,30 @@ export default function MainScreen({ myName, myChannel: initChannel, myPin, myCh
     }).catch(() => {});
   }, [channel]);
 
+  // ── Swipe channel switch ──────────────────────────────────────────
+  const switchChannel = useCallback((newCh: string) => {
+    if (newCh === channel) return;
+    setChannel(newCh); setUsers([]); setLog([]); setTalkerId(null); hideBanner();
+    sessionTxCount.current = 0; sessionTalkMs.current = 0;
+    join(myName, newCh);
+    startClock();
+    // Brief swipe hint
+    setSwipeHint(true);
+    if (swipeHintTimer.current) clearTimeout(swipeHintTimer.current);
+    swipeHintTimer.current = setTimeout(() => setSwipeHint(false), 1800);
+  }, [channel, myName]);
+
   // ── Exit with stats ───────────────────────────────────────────────
   const requestExit = useCallback((type: 'logout' | 'switch') => {
     const hasStats = sessionTxCount.current > 0 || (Date.now() - joinTimeRef.current) > 60_000;
-    if (hasStats) {
-      setPendingExit(type);
-      setStatsOpen(true);
-    } else {
-      type === 'logout' ? onLogout() : onSwitchChannel();
-    }
+    if (hasStats) { setPendingExit(type); setStatsOpen(true); }
+    else { type === 'logout' ? onLogout() : onSwitchChannel(); }
   }, [onLogout, onSwitchChannel]);
 
   const confirmExit = useCallback(() => {
     setStatsOpen(false);
-    if (pendingExit === 'logout')  { onLogout(); }
-    if (pendingExit === 'switch')  { onSwitchChannel(); }
+    if (pendingExit === 'logout') onLogout();
+    if (pendingExit === 'switch') onSwitchChannel();
     setPendingExit(null);
   }, [pendingExit, onLogout, onSwitchChannel]);
 
@@ -354,22 +400,14 @@ export default function MainScreen({ myName, myChannel: initChannel, myPin, myCh
     try {
       const res  = await fetch(`${SERVER_URL}/api/channels`, { signal: controller.signal });
       setChModalData(await res.json());
-    } catch {
-      setChModalData([]);
-    } finally {
-      clearTimeout(timeout);
-      setChModalLoading(false);
-    }
+    } catch { setChModalData([]); }
+    finally { clearTimeout(timeout); setChModalLoading(false); }
   };
 
-  const switchChannel = (newCh: string, isFull?: boolean) => {
+  const switchChannelModal = (newCh: string, isFull?: boolean) => {
     if (isFull) return;
     setChModalOpen(false);
-    if (newCh === channel) return;
-    setChannel(newCh); setUsers([]); setLog([]); setTalkerId(null); hideBanner();
-    sessionTxCount.current = 0; sessionTalkMs.current = 0;
-    join(myName, newCh);
-    startClock();
+    switchChannel(newCh);
   };
 
   const myColors      = avatarColor(myName);
@@ -393,27 +431,20 @@ export default function MainScreen({ myName, myChannel: initChannel, myPin, myCh
     ? 'Solte para enviar'
     : 'Segurar para falar';
 
-  const pttLabelColor = !connected
-    ? C.orange
-    : fullBanner
-    ? C.red
-    : locked
-    ? C.green
-    : muted
-    ? C.purple
-    : !hasMic
-    ? C.red
+  const pttLabelColor = !connected ? C.orange
+    : fullBanner ? C.red
+    : locked     ? C.green
+    : muted      ? C.purple
+    : !hasMic    ? C.red
     : channelBusy ? C.orange
-    : talking ? C.green : C.text3;
+    : talking    ? C.green : C.text3;
 
-  // Session stats for modal
-  const sessionMinutes   = Math.floor((Date.now() - joinTimeRef.current) / 60000);
   const sessionTimeLabel = fmtElapsed(Date.now() - joinTimeRef.current);
   const talkTimeLabel    = fmtMs(sessionTalkMs.current);
 
   return (
-    <View style={[s.root, { paddingTop: insets.top }]}>
-      <StatusBar style="light" />
+    <View style={[s.root, { paddingTop: insets.top }]} {...panResponder.panHandlers}>
+      <StatusBar style={C.bg === '#07090f' ? 'light' : 'dark'} />
 
       {/* ── TOP BAR ── */}
       <View style={s.topbar}>
@@ -441,6 +472,11 @@ export default function MainScreen({ myName, myChannel: initChannel, myPin, myCh
             {reconnecting ? '…' : connected ? ping : 'off'}
           </Text>
         </View>
+
+        {/* Settings button */}
+        <TouchableOpacity onPress={() => setSettingsOpen(true)} style={s.topBtn} activeOpacity={0.7}>
+          <Text style={[s.topBtnText, { fontSize: 16 }]}>⚙️</Text>
+        </TouchableOpacity>
 
         <TouchableOpacity onPress={() => setStatusModal(true)} activeOpacity={0.8} style={{ position: 'relative' }}>
           <LinearGradient colors={myColors} style={s.myAvatar}>
@@ -473,6 +509,13 @@ export default function MainScreen({ myName, myChannel: initChannel, myPin, myCh
         </View>
       )}
 
+      {/* ── SWIPE HINT ── */}
+      {swipeHint && (
+        <View style={s.swipeHint}>
+          <Text style={s.swipeHintText}>← deslize para trocar de canal →</Text>
+        </View>
+      )}
+
       {/* ── VISUALIZER ── */}
       <View style={s.vizWrap}>
         <Visualizer active={talking || isPeerTalking} isPeer={isPeerTalking} />
@@ -498,11 +541,11 @@ export default function MainScreen({ myName, myChannel: initChannel, myPin, myCh
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.usersRow}>
           {users.map(u => {
             const [c1, c2] = avatarColor(u.name);
-            const isMe      = u.id === myId.current;
-            const isTalker  = u.id === talkerId;
-            const uStatus   = (isMe ? myStatus : (u.status ?? 'available')) as UserStatus;
-            const sCfg      = STATUS_CONFIG[uStatus];
-            const canMod    = iAmMod && !isMe;
+            const isMe     = u.id === myId.current;
+            const isTalker = u.id === talkerId;
+            const uStatus  = (isMe ? myStatus : (u.status ?? 'available')) as UserStatus;
+            const sCfg     = STATUS_CONFIG[uStatus];
+            const canMod   = iAmMod && !isMe;
             return (
               <TouchableOpacity
                 key={u.id}
@@ -554,10 +597,7 @@ export default function MainScreen({ myName, myChannel: initChannel, myPin, myCh
                     <Text style={s.logMeta}>🎙 {item.duration}  ·  {item.ts}</Text>
                   </View>
                   {item.audio && (
-                    <TouchableOpacity
-                      style={s.replayBtn}
-                      onPress={() => audio.playAudio(item.audio!).catch(() => {})}
-                    >
+                    <TouchableOpacity style={s.replayBtn} onPress={() => audio.playAudio(item.audio!).catch(() => {})}>
                       <Text style={s.replayIcon}>▶</Text>
                     </TouchableOpacity>
                   )}
@@ -571,10 +611,7 @@ export default function MainScreen({ myName, myChannel: initChannel, myPin, myCh
       {/* ── PTT ZONE ── */}
       <View style={[s.pttZone, { paddingBottom: insets.bottom + 16 }]}>
         {!hasMic && (
-          <TouchableOpacity
-            style={s.micWarning}
-            onPress={() => audio.requestPermission().then(ok => setHasMic(ok))}
-          >
+          <TouchableOpacity style={s.micWarning} onPress={() => audio.requestPermission().then(ok => setHasMic(ok))}>
             <Text style={s.micWarningText}>Toque para ativar o microfone</Text>
           </TouchableOpacity>
         )}
@@ -588,13 +625,9 @@ export default function MainScreen({ myName, myChannel: initChannel, myPin, myCh
           onStop={stopTalking}
         />
 
-        {/* Mute button — full width, very visible */}
         <TouchableOpacity
           style={[s.muteBar, muted && s.muteBarActive]}
-          onPress={() => {
-            setMuted(m => !m);
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-          }}
+          onPress={() => { setMuted(m => !m); haptics.impact('Medium'); }}
           activeOpacity={0.75}
         >
           <Text style={s.muteBarIcon}>{muted ? '🔇' : '🎤'}</Text>
@@ -603,10 +636,8 @@ export default function MainScreen({ myName, myChannel: initChannel, myPin, myCh
           </Text>
         </TouchableOpacity>
 
-        {/* PTT label + lock */}
         <View style={s.pttBottom}>
           <Text style={[s.pttLabel, { color: pttLabelColor, flex: 1, textAlign: 'center' }]}>{pttLabel}</Text>
-
           <TouchableOpacity
             style={[s.ctrlBtn, locked && s.ctrlBtnGreen]}
             onPress={toggleLock}
@@ -628,7 +659,6 @@ export default function MainScreen({ myName, myChannel: initChannel, myPin, myCh
           <View style={s.modalSheet} onStartShouldSetResponder={() => true}>
             <View style={s.modalHandle} />
             <Text style={s.modalTitle}>Trocar de canal</Text>
-
             {chModalLoading ? (
               <ActivityIndicator color={C.cyan} style={{ marginVertical: 24 }} />
             ) : (
@@ -642,16 +672,14 @@ export default function MainScreen({ myName, myChannel: initChannel, myPin, myCh
                       <TouchableOpacity
                         key={ch.name}
                         style={[s.modalChRow, ch.name === channel && s.modalChRowActive, isFull && s.modalChRowFull]}
-                        onPress={() => switchChannel(ch.name, isFull)}
+                        onPress={() => switchChannelModal(ch.name, isFull)}
                         activeOpacity={isFull ? 1 : 0.75}
                       >
                         <Text style={s.modalChIcon}>{ICONS[ch.name] ?? '🔊'}</Text>
                         <View style={{ flex: 1 }}>
                           <Text style={s.modalChName}># {ch.name}</Text>
                           <Text style={[s.modalChMeta, isFull && { color: C.red }]}>
-                            {isFull
-                              ? `Lotado (${ch.online}/${CHANNEL_MAX})`
-                              : ch.online === 0 ? 'Vazio' : `${ch.online}/${CHANNEL_MAX} online`}
+                            {isFull ? `Lotado (${ch.online}/${CHANNEL_MAX})` : ch.online === 0 ? 'Vazio' : `${ch.online}/${CHANNEL_MAX} online`}
                             {!isFull && ch.talking ? ' · 🎙' : ''}
                           </Text>
                         </View>
@@ -667,7 +695,6 @@ export default function MainScreen({ myName, myChannel: initChannel, myPin, myCh
                 )}
               </ScrollView>
             )}
-
             <TouchableOpacity style={s.modalNewBtn} onPress={() => { setChModalOpen(false); requestExit('switch'); }}>
               <Text style={s.modalNewBtnText}>+ Criar novo canal</Text>
             </TouchableOpacity>
@@ -688,7 +715,6 @@ export default function MainScreen({ myName, myChannel: initChannel, myPin, myCh
                 </TouchableOpacity>
               </View>
             </View>
-
             <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.logModalScroll}>
               {log.length === 0 ? (
                 <Text style={s.logEmpty}>Nenhuma transmissão ainda</Text>
@@ -711,7 +737,7 @@ export default function MainScreen({ myName, myChannel: initChannel, myPin, myCh
                           activeOpacity={0.75}
                           onPress={async () => {
                             setPlayingId(item.id);
-                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                            haptics.impact('Light');
                             await audio.playAudio(item.audio!).catch(() => {});
                             setPlayingId(null);
                           }}
@@ -787,22 +813,14 @@ export default function MainScreen({ myName, myChannel: initChannel, myPin, myCh
           <View style={[s.statsSheet, { paddingVertical: 20 }]}>
             <Text style={[s.statsTitle, { marginBottom: 4 }]}>Moderar</Text>
             <Text style={[s.statsSub, { marginBottom: 16 }]}>{modTarget?.name}</Text>
-
             <TouchableOpacity
               style={[s.statusOption, { backgroundColor: C.card }]}
               activeOpacity={0.75}
-              onPress={() => {
-                if (!modTarget) return;
-                modMute(modTarget.id);
-                setModTarget(null);
-              }}
+              onPress={() => { if (!modTarget) return; modMute(modTarget.id); setModTarget(null); }}
             >
               <Text style={{ fontSize: 20 }}>{modTarget?.isMuted ? '🔊' : '🔇'}</Text>
-              <Text style={s.statusOptionLabel}>
-                {modTarget?.isMuted ? 'Desmutar' : 'Silenciar microfone'}
-              </Text>
+              <Text style={s.statusOptionLabel}>{modTarget?.isMuted ? 'Desmutar' : 'Silenciar microfone'}</Text>
             </TouchableOpacity>
-
             <TouchableOpacity
               style={[s.statusOption, { backgroundColor: C.red + '18', marginTop: 6 }]}
               activeOpacity={0.75}
@@ -810,14 +828,10 @@ export default function MainScreen({ myName, myChannel: initChannel, myPin, myCh
                 if (!modTarget) return;
                 const t = modTarget;
                 setModTarget(null);
-                Alert.alert(
-                  'Expulsar usuário',
-                  `Tem certeza que quer expulsar ${t.name} do canal?`,
-                  [
-                    { text: 'Cancelar', style: 'cancel' },
-                    { text: 'Expulsar', style: 'destructive', onPress: () => modKick(t.id) },
-                  ]
-                );
+                Alert.alert('Expulsar usuário', `Tem certeza que quer expulsar ${t.name} do canal?`, [
+                  { text: 'Cancelar', style: 'cancel' },
+                  { text: 'Expulsar', style: 'destructive', onPress: () => modKick(t.id) },
+                ]);
               }}
             >
               <Text style={{ fontSize: 20 }}>🚫</Text>
@@ -858,7 +872,6 @@ export default function MainScreen({ myName, myChannel: initChannel, myPin, myCh
           <View style={s.statsSheet}>
             <Text style={s.statsTitle}>Resumo da sessão</Text>
             <Text style={s.statsSub}># {channel}</Text>
-
             <View style={s.statsGrid}>
               <View style={s.statBox}>
                 <Text style={s.statVal}>{sessionTimeLabel}</Text>
@@ -873,7 +886,6 @@ export default function MainScreen({ myName, myChannel: initChannel, myPin, myCh
                 <Text style={s.statKey}>no ar</Text>
               </View>
             </View>
-
             <View style={s.statsActions}>
               <TouchableOpacity style={s.statsStay} onPress={() => { setStatsOpen(false); setPendingExit(null); }} activeOpacity={0.8}>
                 <Text style={s.statsStayText}>Ficar</Text>
@@ -885,238 +897,247 @@ export default function MainScreen({ myName, myChannel: initChannel, myPin, myCh
           </View>
         </View>
       </Modal>
+
+      {/* ── SETTINGS MODAL ── */}
+      <SettingsModal visible={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </View>
   );
 }
 
-const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: C.bg },
+// Styles factory — recreated when theme changes
+import { ThemeColors } from '../theme';
 
-  topbar: {
-    height: 58, flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: 8, gap: 8,
-    backgroundColor: C.surface, borderBottomWidth: 1, borderBottomColor: C.border,
-  },
-  topBtn:     { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
-  topBtnText: { fontSize: 18, color: C.text2, fontWeight: '600' },
-  chPill: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    backgroundColor: C.card, paddingHorizontal: 10, paddingVertical: 6,
-    borderRadius: 99, borderWidth: 1, borderColor: C.border2,
-  },
-  chDot:   { width: 6, height: 6, borderRadius: 3 },
-  chName:  { fontSize: 13, color: C.text2, fontWeight: '700', lineHeight: 16 },
-  chTimer: { fontSize: 9,  color: C.text3, fontWeight: '500', lineHeight: 12 },
-  chCaret: { fontSize: 11, color: C.text3 },
+function makeStyles(C: ThemeColors) {
+  return StyleSheet.create({
+    root: { flex: 1, backgroundColor: C.bg },
 
-  pingBadge:    { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 99, borderWidth: 1 },
-  pingText:     { fontSize: 11, fontWeight: '600' },
-  myAvatar:     { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
-  myAvatarText: { fontSize: 12, fontWeight: '800', color: '#fff' },
+    topbar: {
+      height: 58, flexDirection: 'row', alignItems: 'center',
+      paddingHorizontal: 8, gap: 8,
+      backgroundColor: C.surface, borderBottomWidth: 1, borderBottomColor: C.border,
+    },
+    topBtn:     { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
+    topBtnText: { fontSize: 18, color: C.text2, fontWeight: '600' },
+    chPill: {
+      flexDirection: 'row', alignItems: 'center', gap: 6,
+      backgroundColor: C.card, paddingHorizontal: 10, paddingVertical: 6,
+      borderRadius: 99, borderWidth: 1, borderColor: C.border2,
+    },
+    chDot:   { width: 6, height: 6, borderRadius: 3 },
+    chName:  { fontSize: 13, color: C.text2, fontWeight: '700', lineHeight: 16 },
+    chTimer: { fontSize: 9,  color: C.text3, fontWeight: '500', lineHeight: 12 },
+    chCaret: { fontSize: 11, color: C.text3 },
 
-  fullBanner: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    backgroundColor: C.red + '18', borderBottomWidth: 1, borderBottomColor: C.red + '44',
-    paddingVertical: 8, paddingHorizontal: 16,
-  },
-  fullBannerText: { fontSize: 12, fontWeight: '700', color: C.red, textAlign: 'center' },
+    pingBadge:    { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 99, borderWidth: 1 },
+    pingText:     { fontSize: 11, fontWeight: '600' },
+    myAvatar:     { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
+    myAvatarText: { fontSize: 12, fontWeight: '800', color: '#fff' },
 
-  reconnBanner: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-    backgroundColor: C.orange + '18', borderBottomWidth: 1, borderBottomColor: C.orange + '44',
-    paddingVertical: 8,
-  },
-  reconnText: { fontSize: 12, fontWeight: '700', color: C.orange },
+    fullBanner: {
+      flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+      backgroundColor: C.red + '18', borderBottomWidth: 1, borderBottomColor: C.red + '44',
+      paddingVertical: 8, paddingHorizontal: 16,
+    },
+    fullBannerText: { fontSize: 12, fontWeight: '700', color: C.red, textAlign: 'center' },
 
-  vizWrap: {
-    height: 60, justifyContent: 'center', alignItems: 'center',
-    backgroundColor: C.surface, borderBottomWidth: 1, borderBottomColor: C.border,
-  },
+    reconnBanner: {
+      flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+      backgroundColor: C.orange + '18', borderBottomWidth: 1, borderBottomColor: C.orange + '44',
+      paddingVertical: 8,
+    },
+    reconnText: { fontSize: 12, fontWeight: '700', color: C.orange },
 
-  bannerWrap: { position: 'absolute', top: 58 + 60, left: 0, right: 0, zIndex: 10, alignItems: 'center', paddingTop: 8 },
-  banner: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    backgroundColor: '#00ff8818', borderWidth: 1, borderColor: C.green,
-    paddingHorizontal: 16, paddingVertical: 8, borderRadius: 99,
-  },
-  bannerDot:  { width: 8, height: 8, borderRadius: 4, backgroundColor: C.green },
-  bannerText: { fontSize: 13, color: C.green, fontWeight: '700' },
+    swipeHint: {
+      backgroundColor: C.cyan + '22', borderBottomWidth: 1, borderBottomColor: C.cyan + '44',
+      paddingVertical: 6, alignItems: 'center',
+    },
+    swipeHintText: { fontSize: 11, color: C.cyan, fontWeight: '600' },
 
-  usersSection: { paddingTop: 12, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: C.border },
-  sectionLabel: {
-    fontSize: 10, fontWeight: '700', color: C.text3,
-    letterSpacing: 1.2, textTransform: 'uppercase', paddingHorizontal: 16, marginBottom: 8,
-  },
-  usersRow:       { paddingHorizontal: 12, gap: 8 },
-  userPill:       {
-    flexDirection: 'row', alignItems: 'center', gap: 7,
-    backgroundColor: C.card, borderWidth: 1, borderColor: C.border2,
-    paddingHorizontal: 10, paddingVertical: 7, borderRadius: 99,
-  },
-  userPillMe:     { borderColor: C.cyan + '55' },
-  userPillTalker: { borderColor: C.green, backgroundColor: '#00ff8812' },
-  pillAvatar:     { width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-  pillAvatarText: { fontSize: 10, fontWeight: '800', color: '#fff' },
-  pillName:       { fontSize: 13, color: C.text2, fontWeight: '600', maxWidth: 70 },
-  pillMic:        { fontSize: 11 },
+    vizWrap: {
+      height: 60, justifyContent: 'center', alignItems: 'center',
+      backgroundColor: C.surface, borderBottomWidth: 1, borderBottomColor: C.border,
+    },
 
-  logSection: { flex: 1, paddingTop: 12 },
-  logScroll:  { flex: 1, paddingHorizontal: 16 },
-  logEmpty:   { fontSize: 13, color: C.text3, textAlign: 'center', marginTop: 24, lineHeight: 20 },
-  logItem:    {
-    flexDirection: 'row', alignItems: 'center', gap: 10,
-    paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: C.border,
-  },
-  logAvatar:     { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
-  logAvatarText: { fontSize: 12, fontWeight: '800', color: '#fff' },
-  logInfo:       { flex: 1 },
-  logName:       { fontSize: 14, fontWeight: '700', color: C.text },
-  logMeta:       { fontSize: 12, color: C.text3, marginTop: 2 },
-  replayBtn:     {
-    width: 32, height: 32, borderRadius: 16,
-    backgroundColor: C.cyanDim, alignItems: 'center', justifyContent: 'center',
-    borderWidth: 1, borderColor: C.cyan + '44',
-  },
-  replayIcon: { fontSize: 10, color: C.cyan },
+    bannerWrap: { position: 'absolute', top: 58 + 60, left: 0, right: 0, zIndex: 10, alignItems: 'center', paddingTop: 8 },
+    banner: {
+      flexDirection: 'row', alignItems: 'center', gap: 8,
+      backgroundColor: '#00ff8818', borderWidth: 1, borderColor: C.green,
+      paddingHorizontal: 16, paddingVertical: 8, borderRadius: 99,
+    },
+    bannerDot:  { width: 8, height: 8, borderRadius: 4, backgroundColor: C.green },
+    bannerText: { fontSize: 13, color: C.green, fontWeight: '700' },
 
-  pttZone: {
-    alignItems: 'center', justifyContent: 'flex-end',
-    borderTopWidth: 1, borderTopColor: C.border,
-    backgroundColor: C.surface,
-  },
-  micWarning:     {
-    marginTop: 12,
-    backgroundColor: C.red + '18', borderWidth: 1, borderColor: C.red + '66',
-    paddingHorizontal: 16, paddingVertical: 8, borderRadius: 99,
-  },
-  micWarningText: { fontSize: 12, color: C.red, fontWeight: '600' },
+    usersSection: { paddingTop: 12, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: C.border },
+    sectionLabel: {
+      fontSize: 10, fontWeight: '700', color: C.text3,
+      letterSpacing: 1.2, textTransform: 'uppercase', paddingHorizontal: 16, marginBottom: 8,
+    },
+    usersRow: { paddingHorizontal: 12, gap: 8 },
+    userPill: {
+      flexDirection: 'row', alignItems: 'center', gap: 7,
+      backgroundColor: C.card, borderWidth: 1, borderColor: C.border2,
+      paddingHorizontal: 10, paddingVertical: 7, borderRadius: 99,
+    },
+    userPillMe:     { borderColor: C.cyan + '55' },
+    userPillTalker: { borderColor: C.green, backgroundColor: '#00ff8812' },
+    pillAvatar:     { width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+    pillAvatarText: { fontSize: 10, fontWeight: '800', color: '#fff' },
+    pillName:       { fontSize: 13, color: C.text2, fontWeight: '600', maxWidth: 70 },
+    pillMic:        { fontSize: 11 },
 
-  muteBar: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    marginTop: -12, marginHorizontal: 20, marginBottom: 4,
-    backgroundColor: C.card, borderWidth: 1.5, borderColor: C.border2,
-    borderRadius: 12, paddingHorizontal: 16, paddingVertical: 10,
-  },
-  muteBarActive:      { backgroundColor: C.purple + '22', borderColor: C.purple },
-  muteBarIcon:        { fontSize: 20 },
-  muteBarLabel:       { fontSize: 12, fontWeight: '700', color: C.text2, flex: 1 },
-  muteBarLabelActive: { color: C.purple },
+    logSection: { flex: 1, paddingTop: 12 },
+    logScroll:  { flex: 1, paddingHorizontal: 16 },
+    logEmpty:   { fontSize: 13, color: C.text3, textAlign: 'center', marginTop: 24, lineHeight: 20 },
+    logItem: {
+      flexDirection: 'row', alignItems: 'center', gap: 10,
+      paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: C.border,
+    },
+    logAvatar:     { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+    logAvatarText: { fontSize: 12, fontWeight: '800', color: '#fff' },
+    logInfo:       { flex: 1 },
+    logName:       { fontSize: 14, fontWeight: '700', color: C.text },
+    logMeta:       { fontSize: 12, color: C.text3, marginTop: 2 },
+    replayBtn: {
+      width: 32, height: 32, borderRadius: 16,
+      backgroundColor: C.cyanDim, alignItems: 'center', justifyContent: 'center',
+      borderWidth: 1, borderColor: C.cyan + '44',
+    },
+    replayIcon: { fontSize: 10, color: C.cyan },
 
-  pttBottom: {
-    flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16,
-    marginBottom: 8,
-  },
-  ctrlBtn: {
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: C.card, borderWidth: 1.5, borderColor: C.border2,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  ctrlBtnGreen:  { borderColor: C.green, backgroundColor: C.greenDim },
-  ctrlBtnIcon:   { fontSize: 18 },
+    pttZone: {
+      alignItems: 'center', justifyContent: 'flex-end',
+      borderTopWidth: 1, borderTopColor: C.border, backgroundColor: C.surface,
+    },
+    micWarning: {
+      marginTop: 12, backgroundColor: C.red + '18', borderWidth: 1, borderColor: C.red + '66',
+      paddingHorizontal: 16, paddingVertical: 8, borderRadius: 99,
+    },
+    micWarningText: { fontSize: 12, color: C.red, fontWeight: '600' },
 
-  pttLabel:  { fontSize: 13, fontWeight: '600', letterSpacing: 0.3 },
-  timerWarn: { fontSize: 11, color: C.red, fontWeight: '700', marginBottom: 4, marginTop: -4 },
+    muteBar: {
+      flexDirection: 'row', alignItems: 'center', gap: 8,
+      marginTop: -12, marginHorizontal: 20, marginBottom: 4,
+      backgroundColor: C.card, borderWidth: 1.5, borderColor: C.border2,
+      borderRadius: 12, paddingHorizontal: 16, paddingVertical: 10,
+    },
+    muteBarActive:      { backgroundColor: C.purple + '22', borderColor: C.purple },
+    muteBarIcon:        { fontSize: 20 },
+    muteBarLabel:       { fontSize: 12, fontWeight: '700', color: C.text2, flex: 1 },
+    muteBarLabelActive: { color: C.purple },
 
-  // Channel modal
-  modalOverlay:     { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
-  modalSheet:       {
-    backgroundColor: C.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24,
-    paddingTop: 12, paddingBottom: 32, paddingHorizontal: 20,
-    borderTopWidth: 1, borderTopColor: C.border2,
-  },
-  modalHandle:      { width: 40, height: 4, borderRadius: 2, backgroundColor: C.border2, alignSelf: 'center', marginBottom: 20 },
-  modalTitle:       { fontSize: 17, fontWeight: '900', color: C.text, marginBottom: 16 },
-  modalEmpty:       { fontSize: 13, color: C.text3, textAlign: 'center', marginVertical: 24 },
-  modalChRow:       { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: C.border },
-  modalChRowActive: { opacity: 0.6 },
-  modalChRowFull:   { opacity: 0.5 },
-  modalChIcon:      { fontSize: 22, width: 32, textAlign: 'center' },
-  modalChName:      { fontSize: 14, fontWeight: '800', color: C.text },
-  modalChMeta:      { fontSize: 12, color: C.text2, marginTop: 2 },
-  modalNewBtn:      { marginTop: 20, paddingVertical: 14, borderRadius: 12, backgroundColor: C.cyanDim, borderWidth: 1, borderColor: C.cyan + '44', alignItems: 'center' },
-  modalNewBtnText:  { fontSize: 14, fontWeight: '800', color: C.cyan },
+    pttBottom: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, marginBottom: 8 },
+    ctrlBtn: {
+      width: 40, height: 40, borderRadius: 20,
+      backgroundColor: C.card, borderWidth: 1.5, borderColor: C.border2,
+      alignItems: 'center', justifyContent: 'center',
+    },
+    ctrlBtnGreen: { borderColor: C.green, backgroundColor: C.greenDim },
+    ctrlBtnIcon:  { fontSize: 18 },
 
-  // Stats modal
-  statsOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', justifyContent: 'center', paddingHorizontal: 24 },
-  statsSheet: {
-    backgroundColor: C.surface, borderRadius: 24,
-    paddingTop: 28, paddingBottom: 24, paddingHorizontal: 24,
-    borderWidth: 1, borderColor: C.border2,
-  },
-  statsTitle: { fontSize: 20, fontWeight: '900', color: C.text, textAlign: 'center' },
-  statsSub:   { fontSize: 13, color: C.text3, textAlign: 'center', marginTop: 4, marginBottom: 24 },
-  statsGrid:  { flexDirection: 'row', gap: 1, marginBottom: 28 },
-  statBox:    { flex: 1, alignItems: 'center', gap: 4 },
-  statBoxMid: { borderLeftWidth: 1, borderRightWidth: 1, borderColor: C.border },
-  statVal:    { fontSize: 22, fontWeight: '900', color: C.cyan },
-  statKey:    { fontSize: 10, color: C.text3, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.8, textAlign: 'center' },
-  statsActions: { flexDirection: 'row', gap: 12 },
-  statsStay:    { flex: 1, paddingVertical: 14, borderRadius: 12, backgroundColor: C.card, borderWidth: 1, borderColor: C.border2, alignItems: 'center' },
-  statsStayText: { fontSize: 14, fontWeight: '700', color: C.text2 },
-  statsLeave:    { flex: 1, paddingVertical: 14, borderRadius: 12, backgroundColor: C.red + '22', borderWidth: 1, borderColor: C.red + '55', alignItems: 'center' },
-  statsLeaveText: { fontSize: 14, fontWeight: '800', color: C.red },
+    pttLabel:  { fontSize: 13, fontWeight: '600', letterSpacing: 0.3 },
+    timerWarn: { fontSize: 11, color: C.red, fontWeight: '700', marginBottom: 4, marginTop: -4 },
 
-  pinInput: {
-    backgroundColor: C.card, borderWidth: 1.5, borderColor: C.border2,
-    borderRadius: 12, paddingHorizontal: 16, paddingVertical: 14,
-    fontSize: 22, fontWeight: '700', color: C.text, textAlign: 'center',
-    letterSpacing: 6, marginVertical: 8,
-  },
-  pinErrorText: { fontSize: 12, color: C.red, fontWeight: '600', textAlign: 'center', marginTop: -4 },
+    // Channel modal
+    modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
+    modalSheet: {
+      backgroundColor: C.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24,
+      paddingTop: 12, paddingBottom: 32, paddingHorizontal: 20,
+      borderTopWidth: 1, borderTopColor: C.border2,
+    },
+    modalHandle:      { width: 40, height: 4, borderRadius: 2, backgroundColor: C.border2, alignSelf: 'center', marginBottom: 20 },
+    modalTitle:       { fontSize: 17, fontWeight: '900', color: C.text, marginBottom: 16 },
+    modalEmpty:       { fontSize: 13, color: C.text3, textAlign: 'center', marginVertical: 24 },
+    modalChRow:       { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: C.border },
+    modalChRowActive: { opacity: 0.6 },
+    modalChRowFull:   { opacity: 0.5 },
+    modalChIcon:      { fontSize: 22, width: 32, textAlign: 'center' },
+    modalChName:      { fontSize: 14, fontWeight: '800', color: C.text },
+    modalChMeta:      { fontSize: 12, color: C.text2, marginTop: 2 },
+    modalNewBtn:      { marginTop: 20, paddingVertical: 14, borderRadius: 12, backgroundColor: C.cyanDim, borderWidth: 1, borderColor: C.cyan + '44', alignItems: 'center' },
+    modalNewBtnText:  { fontSize: 14, fontWeight: '800', color: C.cyan },
 
-  // Log section extras
-  logHeader:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, marginBottom: 8 },
-  logExpandBtn:  { paddingVertical: 2, paddingHorizontal: 4 },
-  logExpandText: { fontSize: 11, fontWeight: '700', color: C.cyan, letterSpacing: 0.3 },
+    // Stats / general modal
+    statsOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', justifyContent: 'center', paddingHorizontal: 24 },
+    statsSheet: {
+      backgroundColor: C.surface, borderRadius: 24,
+      paddingTop: 28, paddingBottom: 24, paddingHorizontal: 24,
+      borderWidth: 1, borderColor: C.border2,
+    },
+    statsTitle: { fontSize: 20, fontWeight: '900', color: C.text, textAlign: 'center' },
+    statsSub:   { fontSize: 13, color: C.text3, textAlign: 'center', marginTop: 4, marginBottom: 24 },
+    statsGrid:  { flexDirection: 'row', gap: 1, marginBottom: 28 },
+    statBox:    { flex: 1, alignItems: 'center', gap: 4 },
+    statBoxMid: { borderLeftWidth: 1, borderRightWidth: 1, borderColor: C.border },
+    statVal:    { fontSize: 22, fontWeight: '900', color: C.cyan },
+    statKey:    { fontSize: 10, color: C.text3, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.8, textAlign: 'center' },
+    statsActions:  { flexDirection: 'row', gap: 12 },
+    statsStay:     { flex: 1, paddingVertical: 14, borderRadius: 12, backgroundColor: C.card, borderWidth: 1, borderColor: C.border2, alignItems: 'center' },
+    statsStayText: { fontSize: 14, fontWeight: '700', color: C.text2 },
+    statsLeave:    { flex: 1, paddingVertical: 14, borderRadius: 12, backgroundColor: C.red + '22', borderWidth: 1, borderColor: C.red + '55', alignItems: 'center' },
+    statsLeaveText: { fontSize: 14, fontWeight: '800', color: C.red },
 
-  // Log expanded modal
-  logModalOverlay:    { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
-  logModalSheet:      {
-    backgroundColor: C.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24,
-    maxHeight: '85%', borderTopWidth: 1, borderTopColor: C.border2,
-  },
-  logModalHeader:    { paddingTop: 12, paddingHorizontal: 20 },
-  logModalTitleRow:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
-  logModalClose:     { width: 32, height: 32, borderRadius: 16, backgroundColor: C.card, alignItems: 'center', justifyContent: 'center' },
-  logModalCloseText: { fontSize: 14, color: C.text2, fontWeight: '700' },
-  logModalScroll:    { paddingHorizontal: 20, paddingBottom: 8 },
-  logModalItem:      {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: C.border,
-  },
-  logModalAvatar:     { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
-  logModalAvatarText: { fontSize: 16, fontWeight: '800', color: '#fff' },
-  logModalInfo:       { flex: 1 },
-  logModalName:       { fontSize: 15, fontWeight: '800', color: C.text },
-  logModalMeta:       { fontSize: 13, color: C.text3, marginTop: 3 },
-  replayBtnLarge: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    backgroundColor: C.cyanDim, borderWidth: 1.5, borderColor: C.cyan + '66',
-    borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, minWidth: 80,
-  },
-  replayBtnLargeActive: { backgroundColor: C.cyan, borderColor: C.cyan },
-  replayBtnLargeIcon:   { fontSize: 14, color: C.cyan, fontWeight: '800' },
-  replayBtnLargeLabel:  { fontSize: 12, color: C.cyan, fontWeight: '700' },
-  replayBtnNoAudio:     { paddingHorizontal: 10, paddingVertical: 10 },
-  replayBtnNoAudioText: { fontSize: 11, color: C.text3 },
+    pinInput: {
+      backgroundColor: C.card, borderWidth: 1.5, borderColor: C.border2,
+      borderRadius: 12, paddingHorizontal: 16, paddingVertical: 14,
+      fontSize: 22, fontWeight: '700', color: C.text, textAlign: 'center',
+      letterSpacing: 6, marginVertical: 8,
+    },
+    pinErrorText: { fontSize: 12, color: C.red, fontWeight: '600', textAlign: 'center', marginTop: -4 },
 
-  // Status
-  statusDot: {
-    position: 'absolute', bottom: 0, right: 0,
-    width: 10, height: 10, borderRadius: 5,
-    borderWidth: 2, borderColor: C.surface,
-  },
-  pillStatusDot: {
-    position: 'absolute', bottom: 0, right: 0,
-    width: 8, height: 8, borderRadius: 4,
-    borderWidth: 1.5, borderColor: C.surface,
-  },
-  statusOption: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    paddingHorizontal: 20, paddingVertical: 14,
-    borderRadius: 12, marginHorizontal: 4,
-  },
-  statusOptionActive: { backgroundColor: C.card },
-  statusOptionDot:    { width: 12, height: 12, borderRadius: 6 },
-  statusOptionLabel:  { fontSize: 16, color: C.text2, fontWeight: '600' },
-});
+    // Log section extras
+    logHeader:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, marginBottom: 8 },
+    logExpandBtn: { paddingVertical: 2, paddingHorizontal: 4 },
+    logExpandText: { fontSize: 11, fontWeight: '700', color: C.cyan, letterSpacing: 0.3 },
+
+    // Log expanded modal
+    logModalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
+    logModalSheet:   {
+      backgroundColor: C.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24,
+      maxHeight: '85%', borderTopWidth: 1, borderTopColor: C.border2,
+    },
+    logModalHeader:    { paddingTop: 12, paddingHorizontal: 20 },
+    logModalTitleRow:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
+    logModalClose:     { width: 32, height: 32, borderRadius: 16, backgroundColor: C.card, alignItems: 'center', justifyContent: 'center' },
+    logModalCloseText: { fontSize: 14, color: C.text2, fontWeight: '700' },
+    logModalScroll:    { paddingHorizontal: 20, paddingBottom: 8 },
+    logModalItem:      {
+      flexDirection: 'row', alignItems: 'center', gap: 12,
+      paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: C.border,
+    },
+    logModalAvatar:     { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
+    logModalAvatarText: { fontSize: 16, fontWeight: '800', color: '#fff' },
+    logModalInfo:       { flex: 1 },
+    logModalName:       { fontSize: 15, fontWeight: '800', color: C.text },
+    logModalMeta:       { fontSize: 13, color: C.text3, marginTop: 3 },
+    replayBtnLarge: {
+      flexDirection: 'row', alignItems: 'center', gap: 6,
+      backgroundColor: C.cyanDim, borderWidth: 1.5, borderColor: C.cyan + '66',
+      borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, minWidth: 80,
+    },
+    replayBtnLargeActive: { backgroundColor: C.cyan, borderColor: C.cyan },
+    replayBtnLargeIcon:   { fontSize: 14, color: C.cyan, fontWeight: '800' },
+    replayBtnLargeLabel:  { fontSize: 12, color: C.cyan, fontWeight: '700' },
+    replayBtnNoAudio:     { paddingHorizontal: 10, paddingVertical: 10 },
+    replayBtnNoAudioText: { fontSize: 11, color: C.text3 },
+
+    // Status
+    statusDot: {
+      position: 'absolute', bottom: 0, right: 0,
+      width: 10, height: 10, borderRadius: 5,
+      borderWidth: 2, borderColor: C.surface,
+    },
+    pillStatusDot: {
+      position: 'absolute', bottom: 0, right: 0,
+      width: 8, height: 8, borderRadius: 4,
+      borderWidth: 1.5, borderColor: C.surface,
+    },
+    statusOption: {
+      flexDirection: 'row', alignItems: 'center', gap: 12,
+      paddingHorizontal: 20, paddingVertical: 14,
+      borderRadius: 12, marginHorizontal: 4,
+    },
+    statusOptionActive:  { backgroundColor: C.card },
+    statusOptionDot:     { width: 12, height: 12, borderRadius: 6 },
+    statusOptionLabel:   { fontSize: 16, color: C.text2, fontWeight: '600' },
+  });
+}

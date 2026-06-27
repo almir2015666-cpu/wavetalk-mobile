@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { AppProvider }       from './src/contexts/AppContext';
 import { storage }           from './src/hooks/useStorage';
 import OnboardingScreen      from './src/screens/OnboardingScreen';
 import LoginScreen           from './src/screens/LoginScreen';
@@ -56,6 +57,7 @@ export default function App() {
   if (screen === 'loading') return null;
 
   return (
+    <AppProvider>
     <SafeAreaProvider>
       {screen === 'onboarding' && (
         <OnboardingScreen onDone={handleOnboardingDone} />
@@ -81,5 +83,6 @@ export default function App() {
         />
       )}
     </SafeAreaProvider>
+    </AppProvider>
   );
 }

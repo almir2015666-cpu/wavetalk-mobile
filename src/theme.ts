@@ -1,4 +1,23 @@
-export const C = {
+export type ThemeColors = {
+  bg:        string;
+  surface:   string;
+  card:      string;
+  border:    string;
+  border2:   string;
+  cyan:      string;
+  cyanDim:   string;
+  purple:    string;
+  purpleDim: string;
+  green:     string;
+  greenDim:  string;
+  red:       string;
+  orange:    string;
+  text:      string;
+  text2:     string;
+  text3:     string;
+};
+
+export const DARK_COLORS: ThemeColors = {
   bg:         '#07090f',
   surface:    '#0d1320',
   card:       '#111927',
@@ -16,6 +35,28 @@ export const C = {
   text2:      '#6b859e',
   text3:      '#3d566e',
 };
+
+export const LIGHT_COLORS: ThemeColors = {
+  bg:         '#f0f4f8',
+  surface:    '#ffffff',
+  card:       '#e8edf5',
+  border:     '#d0d9e6',
+  border2:    '#c0ccd9',
+  cyan:       '#007aaa',
+  cyanDim:    '#007aaa22',
+  purple:     '#6b21e8',
+  purpleDim:  '#6b21e822',
+  green:      '#007a44',
+  greenDim:   '#007a4422',
+  red:        '#cc2233',
+  orange:     '#bb5500',
+  text:       '#1a2535',
+  text2:      '#4a6080',
+  text3:      '#8899aa',
+};
+
+// Backward-compat default (dark) — used in non-themed components
+export const C = DARK_COLORS;
 
 export const AVATAR_COLORS: [string, string][] = [
   ['#00d4ff','#7c3aff'],
