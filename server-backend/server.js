@@ -57,12 +57,39 @@ app.get('/privacy', (_req, res) => {
    users    : Map<socketId, { id, name, channel, talking, talkStart }>
    talking  : Map<channelKey, socketId | null>
 ──────────────────────────────────────────────────────────────── */
-const channels    = new Map();
-const users       = new Map();
-const talking     = new Map();
-const channelPins = new Map(); // channelKey → pin (string)
-const channelMods = new Map(); // channelKey → socketId of mod
-const channelMuted = new Map(); // channelKey → Set<socketId>
+const channels         = new Map();
+const users            = new Map();
+const talking          = new Map();
+const channelPins      = new Map(); // channelKey → pin (string)
+const channelMods      = new Map(); // channelKey → socketId of mod
+const channelMuted     = new Map(); // channelKey → Set<socketId>
+// Push tokens: channelKey → Map<userName, expoPushToken>
+// Persiste mesmo após disconnect — para notificar app fechado
+const channelPushTokens = new Map();
+
+async function sendExpoPush(tokens, speakerName, channelKey) {
+  if (!tokens || tokens.length === 0) return;
+  const messages = tokens.map(token => ({
+    to:    token,
+    title: '📻 WaveTalk',
+    body:  `${speakerName} está falando em #${channelKey}`,
+    sound: 'default',
+    data:  { channel: channelKey },
+    priority: 'high',
+    ttl: 60,
+  }));
+  try {
+    const res = await fetch('https://exp.host/--/api/v2/push/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify(messages),
+    });
+    if (!res.ok) console.log('  push error:', res.status);
+    else         console.log(`  push sent to ${tokens.length} device(s) → ${speakerName} @ #${channelKey}`);
+  } catch (e) {
+    console.log('  push fetch error:', e.message);
+  }
+}
 
 const DEFAULT_CHANNELS = ['geral-1', 'geral-2', 'geral-3', 'geral-4'];
 const CHANNEL_MAX      = 20;
@@ -119,7 +146,7 @@ function leaveChannel(socket, key) {
   }
   socket.to(key).emit('webrtc:peer-left', { peerId: socket.id });
   if (channels.get(key).size === 0 && !DEFAULT_CHANNELS.includes(key)) {
-    channels.delete(key); talking.delete(key); channelMuted.delete(key); channelMods.delete(key);
+    channels.delete(key); talking.delete(key); channelMuted.delete(key); channelMods.delete(key); channelPushTokens.delete(key);
   } else {
     broadcastChannel(key);
   }
@@ -260,6 +287,15 @@ io.on('connection', (socket) => {
     broadcastChannel(mod.channel);
   });
 
+  /* ── PUSH REGISTER ── */
+  socket.on('push:register', ({ token }) => {
+    const user = users.get(socket.id);
+    if (!user || !token || !token.startsWith('ExponentPushToken')) return;
+    if (!channelPushTokens.has(user.channel)) channelPushTokens.set(user.channel, new Map());
+    channelPushTokens.get(user.channel).set(user.name.toLowerCase(), token);
+    console.log(`  push  registered ${user.name} @ #${user.channel}`);
+  });
+
   /* ── PTT START ── */
   socket.on('ptt:start', () => {
     const user = users.get(socket.id);
@@ -280,6 +316,15 @@ io.on('connection', (socket) => {
     io.to(ch).emit('ptt:start', { userId: socket.id, name: user.name });
     broadcastChannel(ch);
     console.log(`  ptt+  ${user.name} @ #${ch}`);
+
+    // Push para quem tem token e não é o falante
+    const tokensMap = channelPushTokens.get(ch);
+    if (tokensMap && tokensMap.size > 0) {
+      const tokens = [...tokensMap.entries()]
+        .filter(([name]) => name !== user.name.toLowerCase())
+        .map(([, t]) => t);
+      if (tokens.length > 0) sendExpoPush(tokens, user.name, ch).catch(() => {});
+    }
   });
 
   /* ── PTT STOP ── */
