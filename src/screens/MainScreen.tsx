@@ -343,6 +343,11 @@ export default function MainScreen({ myName, myChannel: initChannel, myPin, myCh
     else        { setLocked(true);  await startTalking(); }
   }, [locked, talking, connected]);
 
+  // Ativado pelo swipe para cima no PTTButton (já está transmitindo)
+  const activateLock = useCallback(() => {
+    setLocked(true);
+  }, []);
+
   const STATUS_CONFIG = {
     available: { label: 'Disponível', color: C.green,  icon: '●' },
     busy:      { label: 'Ocupado',    color: C.red,    icon: '●' },
@@ -624,6 +629,7 @@ export default function MainScreen({ myName, myChannel: initChannel, myPin, myCh
           talkSeconds={talkSeconds}
           onStart={startTalking}
           onStop={stopTalking}
+          onLock={activateLock}
         />
 
         <TouchableOpacity
