@@ -26,7 +26,8 @@
   "submit": {
     "production": {
       "ios": {
-        "language": "pt-BR"
+        "language": "pt-BR",
+        "appleId": ""
       }
     }
   }
