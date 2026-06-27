@@ -21,6 +21,8 @@ workflows:
         script: npm install --legacy-peer-deps
       - name: Prebuild iOS
         script: npx expo prebuild --platform ios --clean
+      - name: Add Apple Watch target
+        script: ruby scripts/add_watch_target.rb
       - name: Install CocoaPods
         script: |
           cd ios
@@ -38,6 +40,9 @@ workflows:
           export APP_STORE_CONNECT_KEY_IDENTIFIER="$APP_STORE_CONNECT_KEY_ID"
           export APP_STORE_CONNECT_PRIVATE_KEY="$APP_STORE_CONNECT_API_KEY"
           app-store-connect fetch-signing-files com.wavetalk.app \
+            --type IOS_APP_STORE \
+            --create
+          app-store-connect fetch-signing-files com.wavetalk.app.watchkitapp \
             --type IOS_APP_STORE \
             --create
           keychain add-certificates
