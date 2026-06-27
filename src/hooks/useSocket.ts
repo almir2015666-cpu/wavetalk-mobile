@@ -69,15 +69,14 @@ export function useSocket(callbacks: SocketCallbacks) {
     };
   }, []);
 
-  const join         = useCallback((name: string, channel: string, pin?: string, channelPin?: string) => socketRef.current?.emit('join', { name, channel, pin, channelPin }), []);
-  const pttStart     = useCallback(() => socketRef.current?.emit('ptt:start'), []);
-  const pttStop      = useCallback(() => socketRef.current?.emit('ptt:stop'),  []);
-  const sendAudio    = useCallback((data: string) => socketRef.current?.emit('audio:send', { data }), []);
-  const getId        = useCallback(() => socketRef.current?.id ?? '', []);
-  const setStatus    = useCallback((status: string) => socketRef.current?.emit('status:set', status), []);
-  const modKick      = useCallback((userId: string) => socketRef.current?.emit('mod:kick', { userId }), []);
-  const modMute      = useCallback((userId: string) => socketRef.current?.emit('mod:mute', { userId }), []);
-  const registerPush = useCallback((token: string) => socketRef.current?.emit('push:register', { token }), []);
+  const join      = useCallback((name: string, channel: string, pin?: string, channelPin?: string) => socketRef.current?.emit('join', { name, channel, pin, channelPin }), []);
+  const pttStart  = useCallback(() => socketRef.current?.emit('ptt:start'), []);
+  const pttStop   = useCallback(() => socketRef.current?.emit('ptt:stop'),  []);
+  const sendAudio = useCallback((data: string) => socketRef.current?.emit('audio:send', { data }), []);
+  const getId     = useCallback(() => socketRef.current?.id ?? '', []);
+  const setStatus = useCallback((status: string) => socketRef.current?.emit('status:set', status), []);
+  const modKick   = useCallback((userId: string) => socketRef.current?.emit('mod:kick', { userId }), []);
+  const modMute   = useCallback((userId: string) => socketRef.current?.emit('mod:mute', { userId }), []);
 
-  return { join, pttStart, pttStop, sendAudio, getId, setStatus, modKick, modMute, registerPush };
+  return { join, pttStart, pttStop, sendAudio, getId, setStatus, modKick, modMute };
 }

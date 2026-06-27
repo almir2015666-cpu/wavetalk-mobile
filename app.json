@@ -37,21 +37,10 @@
       [
         "expo-av",
         { "microphonePermission": "WaveTalk precisa do microfone para push-to-talk." }
-      ],
-      [
-        "expo-notifications",
-        {
-          "icon": "./assets/icon.png",
-          "color": "#07090f",
-          "sounds": []
-        }
       ]
     ],
     "extra": {
-      "serverUrl": "http://localhost:3001",
-      "eas": {
-        "projectId": "00000000-0000-0000-0000-000000000000"
-      }
+      "serverUrl": "http://localhost:3001"
     }
   }
 }

@@ -132,15 +132,10 @@ export default function MainScreen({ myName, myChannel: initChannel, myPin, myCh
 
   useKeepAwake();
   const audio     = useAudio(setIsPlaying);
-  const { notifyIncoming, pushToken } = useBackground();
+  const { notifyIncoming } = useBackground();
   const pttSounds = usePTTSounds();
 
   useEffect(() => { audio.requestPermission().then(ok => setHasMic(ok)); }, []);
-
-  // Envia o token push ao servidor quando disponível + conectado
-  useEffect(() => {
-    if (connected && pushToken) registerPush(pushToken);
-  }, [connected, pushToken]);
 
   // Fetch channel list for swipe navigation
   const refreshChannelList = useCallback(async () => {
@@ -204,7 +199,7 @@ export default function MainScreen({ myName, myChannel: initChannel, myPin, myCh
     setLog(prev => [{ id: String(Date.now()), name, duration, ts, audio: audioData }, ...prev].slice(0, 50));
   }, []);
 
-  const { join, pttStart, pttStop, sendAudio, getId, setStatus, modKick, modMute, registerPush } = useSocket({
+  const { join, pttStart, pttStop, sendAudio, getId, setStatus, modKick, modMute } = useSocket({
     onConnect: () => {
       setConnected(true); setReconnecting(false); setFullBanner(false);
       myId.current = getId();

@@ -1,26 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
-import { AppState, AppStateStatus, Platform } from 'react-native';
+import { useEffect, useRef } from 'react';
+import { AppState, AppStateStatus } from 'react-native';
 import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Notifications from 'expo-notifications';
-import Constants from 'expo-constants';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
-
-async function getExpoPushToken(): Promise<string | null> {
-  try {
-    if (Platform.OS === 'web') return null;
-    const { status } = await Notifications.requestPermissionsAsync();
-    if (status !== 'granted') return null;
-    const projectId =
-      Constants.expoConfig?.extra?.eas?.projectId ??
-      Constants.easConfig?.projectId;
-    if (!projectId) return null;
-    const { data } = await Notifications.getExpoPushTokenAsync({ projectId });
-    return data;
-  } catch {
-    return null;
-  }
-}
 
 // Generate silent WAV (0.5s, 8kHz, mono, 16-bit) as base64 — synchronous
 function buildSilentWavB64(): string {
@@ -64,9 +47,9 @@ export function useBackground(onNotificationTap?: () => void) {
   const silentSound = useRef<Audio.Sound | null>(null);
   const appState    = useRef<AppStateStatus>(AppState.currentState);
   const silentUri   = useRef<string>('');
-  const [pushToken, setPushToken] = useState<string | null>(null);
 
   useEffect(() => {
+    // Write silent file eagerly so it's ready for first background
     const writeSilentFile = async () => {
       try {
         const path = (FileSystem.cacheDirectory || '') + 'wt_silence.wav';
@@ -78,8 +61,7 @@ export function useBackground(onNotificationTap?: () => void) {
     };
     writeSilentFile();
 
-    // Tenta obter o token de push real (app completamente fechado)
-    getExpoPushToken().then(t => { if (t) setPushToken(t); });
+    Notifications.requestPermissionsAsync().catch(() => {});
 
     const sub = Notifications.addNotificationResponseReceivedListener(() => {
       onNotificationTap?.();
@@ -160,5 +142,5 @@ export function useBackground(onNotificationTap?: () => void) {
     }
   };
 
-  return { notifyIncoming, pushToken };
+  return { notifyIncoming };
 }
