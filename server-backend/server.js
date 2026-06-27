@@ -26,6 +26,32 @@ app.get('/', (_req, res) => {
   res.sendFile(path.join(FRONTEND_DIR, 'index.html'));
 });
 
+app.get('/privacy', (_req, res) => {
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.send(`<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>WaveTalk – Política de Privacidade</title><style>body{font-family:-apple-system,BlinkMacSystemFont,Helvetica,sans-serif;max-width:720px;margin:40px auto;padding:0 24px;color:#1a1a2e;line-height:1.7}h1{font-size:28px;font-weight:800;margin-bottom:4px}h2{font-size:18px;font-weight:700;margin-top:36px}p,li{font-size:15px;color:#333}.date{font-size:13px;color:#888;margin-bottom:32px}</style></head><body>
+<h1>Política de Privacidade – WaveTalk</h1>
+<p class="date">Última atualização: junho de 2026</p>
+<p>O WaveTalk é um aplicativo de comunicação push-to-talk (PTT) em tempo real. Esta política descreve como tratamos as informações dos usuários.</p>
+<h2>Dados coletados</h2>
+<ul>
+  <li><strong>Nome de exibição:</strong> fornecido pelo próprio usuário ao entrar no app. Não é vinculado a conta, e-mail ou identidade real.</li>
+  <li><strong>Áudio de voz:</strong> capturado apenas enquanto o botão PTT está pressionado. O áudio é transmitido em tempo real aos demais participantes do canal e <strong>não é armazenado</strong> em nenhum servidor.</li>
+</ul>
+<h2>Dados NÃO coletados</h2>
+<p>O WaveTalk não coleta localização, contatos, histórico de navegação, identificadores de dispositivo, dados de saúde ou qualquer outro dado pessoal além dos listados acima.</p>
+<h2>Compartilhamento de dados</h2>
+<p>Nenhum dado é vendido, compartilhado ou transferido a terceiros para fins comerciais.</p>
+<h2>Retenção</h2>
+<p>O nome de exibição existe apenas durante a sessão ativa. Ao sair do canal, nenhuma informação é retida nos servidores.</p>
+<h2>Segurança</h2>
+<p>A comunicação entre o app e o servidor utiliza HTTPS/WSS (criptografia em trânsito).</p>
+<h2>Menores de idade</h2>
+<p>O WaveTalk não é direcionado a crianças menores de 4 anos e não coleta intencionalmente dados de menores.</p>
+<h2>Contato</h2>
+<p>Dúvidas sobre esta política: <a href="mailto:almir2015.666@gmail.com">almir2015.666@gmail.com</a></p>
+</body></html>`);
+});
+
 /* ── In-memory state ─────────────────────────────────────────────
    channels : Map<key, Set<socketId>>
    users    : Map<socketId, { id, name, channel, talking, talkStart }>
