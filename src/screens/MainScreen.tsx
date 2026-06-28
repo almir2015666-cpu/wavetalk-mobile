@@ -238,9 +238,13 @@ export default function MainScreen({ myName, myChannel: initChannel, myPin, myCh
         }
       }
     },
-    onPttBlocked: () => {
+    onPttBlocked: (by: string) => {
       setTalking(false); setLocked(false); clearTalkTimer();
       haptics.notification('Warning');
+      if (by === 'reprodução') {
+        // Áudio anterior ainda tocando — vibração leve e sem toast agressivo
+        haptics.impact('Light');
+      }
     },
     onAudioRecv: (data, from, name) => {
       if (myStatusRef.current === 'busy') return;

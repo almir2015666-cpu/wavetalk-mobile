@@ -57,12 +57,13 @@ app.get('/privacy', (_req, res) => {
    users    : Map<socketId, { id, name, channel, talking, talkStart }>
    talking  : Map<channelKey, socketId | null>
 ──────────────────────────────────────────────────────────────── */
-const channels    = new Map();
-const users       = new Map();
-const talking     = new Map();
-const channelPins = new Map(); // channelKey → pin (string)
-const channelMods = new Map(); // channelKey → socketId of mod
-const channelMuted = new Map(); // channelKey → Set<socketId>
+const channels           = new Map();
+const users              = new Map();
+const talking            = new Map();
+const channelPins        = new Map(); // channelKey → pin (string)
+const channelMods        = new Map(); // channelKey → socketId of mod
+const channelMuted       = new Map(); // channelKey → Set<socketId>
+const channelPlaybackEnd = new Map(); // channelKey → timestamp até quando áudio toca
 
 const DEFAULT_CHANNELS = ['geral-1', 'geral-2', 'geral-3', 'geral-4'];
 const CHANNEL_MAX      = 20;
@@ -270,6 +271,12 @@ io.on('connection', (socket) => {
       socket.emit('ptt:blocked', { by: 'moderador' });
       return;
     }
+    // Block if áudio anterior ainda está tocando nos clientes
+    const playbackEnd = channelPlaybackEnd.get(ch);
+    if (playbackEnd && Date.now() < playbackEnd) {
+      socket.emit('ptt:blocked', { by: 'reprodução' });
+      return;
+    }
     const cur = talking.get(ch);
     if (cur && cur !== socket.id) {
       socket.emit('ptt:blocked', { by: users.get(cur)?.name || 'alguém' });
@@ -287,13 +294,21 @@ io.on('connection', (socket) => {
     const user = users.get(socket.id);
     if (!user) return;
     const ch  = user.channel;
-    const dur = user.talkStart ? Math.round((Date.now() - user.talkStart) / 1000) : 0;
+    const durMs = user.talkStart ? Date.now() - user.talkStart : 0;
+    const dur   = Math.round(durMs / 1000);
     user.talking = false; user.talkStart = null;
     if (talking.get(ch) === socket.id) talking.set(ch, null);
     const label = `${Math.floor(dur / 60)}:${String(dur % 60).padStart(2, '0')}`;
     io.to(ch).emit('ptt:stop', { userId: socket.id, name: user.name, duration: label });
     broadcastChannel(ch);
     console.log(`  ptt-  ${user.name} @ #${ch} (${label})`);
+
+    // Bloqueia novas transmissões enquanto o áudio ainda está tocando nos clientes
+    // (duração real + 1.2s de buffer para latência de rede)
+    if (durMs > 0) {
+      const blockMs = Math.min(durMs + 1200, 30000);
+      channelPlaybackEnd.set(ch, Date.now() + blockMs);
+    }
   });
 
   /* ── AUDIO RELAY ── */
